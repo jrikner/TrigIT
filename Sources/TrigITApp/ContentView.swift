@@ -164,6 +164,9 @@ struct ShowScreenView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if let alert = model.alert {
+                TimecodeAlertBanner(text: ShowModel.alertText(alert))
+            }
             HStack {
                 SourceBadge()
                 Spacer()
@@ -171,6 +174,7 @@ struct ShowScreenView: View {
                     .font(.system(.title3, design: .monospaced))
             }
             SourcePicker()
+            SourceHealthView()
 
             Text(model.playhead?.description ?? "--:--:--:--")
                 .font(.system(size: 76, weight: .bold, design: .monospaced))
@@ -194,13 +198,69 @@ struct ShowScreenView: View {
 
 // MARK: - Timecode Source
 
+/// A flashing red banner saying exactly what is wrong with timecode. It goes
+/// away by itself when the engine clears the alert.
+struct TimecodeAlertBanner: View {
+    let text: String
+    @State private var dim = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Label(text, systemImage: "exclamationmark.triangle.fill")
+            .font(.title3.weight(.bold))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.red))
+            .foregroundColor(.white)
+            .opacity(dim ? 0.35 : 1)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.updatesFrequently)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { dim = true }
+            }
+    }
+}
+
+/// Each chosen source, its health, and which one is live.
+struct SourceHealthView: View {
+    @EnvironmentObject private var model: ShowModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            row(.primary)
+            if model.backupSource != nil { row(.backup) }
+        }
+        .font(.callout)
+    }
+
+    private func row(_ role: SourceRole) -> some View {
+        let healthy = model.healthySources.contains(role)
+        let live = model.liveSource == role
+        return HStack(spacing: 6) {
+            Image(systemName: healthy ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                .foregroundColor(healthy ? .green : .red)
+            Text(role == .primary ? "Primary" : "Backup").fontWeight(live ? .bold : .regular)
+            Text(model.sourceLabel(for: role)).foregroundColor(.secondary).lineLimit(1)
+            Text(healthy ? "OK" : "lost").foregroundColor(healthy ? .secondary : .red)
+            if live { Text("LIVE").font(.caption.weight(.bold)).foregroundColor(.green) }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// Which source is live and whether timecode is arriving from it.
 struct SourceBadge: View {
     @EnvironmentObject private var model: ShowModel
 
+    private var live: TimecodeSourceChoice {
+        (model.liveSource == .backup ? model.backupSource : nil) ?? model.source
+    }
+
     var body: some View {
         HStack(spacing: 8) {
-            switch model.source {
+            switch live {
             case .simulator:
                 badge("SIMULATOR", color: .orange)
                 Text(model.simulator.isPlaying ? "Playing" : "Stopped")
@@ -219,7 +279,7 @@ struct SourceBadge: View {
     }
 
     private var sourceKind: String {
-        switch model.source {
+        switch live {
         case .mtc: return "MTC"
         case .artNet: return "ART-NET TC"
         default: return "LTC"
@@ -236,49 +296,46 @@ struct SourceBadge: View {
     }
 }
 
+/// The Primary Source and the optional Backup Source.
 struct SourcePicker: View {
     @EnvironmentObject private var model: ShowModel
 
     var body: some View {
-        Picker("Timecode Source", selection: Binding(
-            get: { model.source },
-            set: { model.selectSource($0) }
-        )) {
-            Text("Simulator").tag(TimecodeSourceChoice.simulator)
-            ForEach(model.audioInputDevices) { device in
-                ForEach(0..<device.channelCount, id: \.self) { channel in
-                    Text("LTC: \(device.name), channel \(channel + 1)")
-                        .tag(TimecodeSourceChoice.ltc(deviceUID: device.uid, channel: channel))
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Primary Source", selection: Binding(
+                get: { model.source },
+                set: { model.selectSource($0) }
+            )) {
+                ForEach(options(current: model.source), id: \.self) { choice in
+                    Text(model.sourceLabel(choice)).tag(choice)
                 }
             }
-            ForEach(model.midiSources) { source in
-                Text("MTC: \(source.name)")
-                    .tag(TimecodeSourceChoice.mtc(sourceID: source.uniqueID))
-            }
-            ForEach(model.networkInterfaces) { interface in
-                Text("Art-Net Timecode: \(interface.label)")
-                    .tag(TimecodeSourceChoice.artNet(interface: interface.name))
-            }
-            Text("Art-Net Timecode: any network interface")
-                .tag(TimecodeSourceChoice.artNet(interface: nil))
-            // Keep a chosen device that is unplugged visible rather than silently switching.
-            if isMissing {
-                Text(model.sourceLabel(model.source))
-                    .tag(model.source)
+            Picker("Backup Source", selection: Binding<TimecodeSourceChoice?>(
+                get: { model.backupSource },
+                set: { model.selectBackupSource($0) }
+            )) {
+                Text("None").tag(TimecodeSourceChoice?.none)
+                // One input per kind: the Backup must be a different kind than the Primary.
+                ForEach(options(current: model.backupSource).filter { $0.kind != model.source.kind }, id: \.self) { choice in
+                    Text(model.sourceLabel(choice)).tag(Optional(choice))
+                }
             }
         }
         .frame(maxWidth: 420)
     }
 
-    private var isMissing: Bool {
-        switch model.source {
-        case .simulator: return false
-        case .ltc(let uid, _): return !model.audioInputDevices.contains { $0.uid == uid }
-        case .mtc(let id): return !model.midiSources.contains { $0.uniqueID == id }
-        case .artNet(let interface):
-            guard let interface else { return false }
-            return !model.networkInterfaces.contains { $0.name == interface }
+    /// Every available source, plus `current` if its device is unplugged, so
+    /// a missing device stays visible rather than silently switching.
+    private func options(current: TimecodeSourceChoice?) -> [TimecodeSourceChoice] {
+        var choices: [TimecodeSourceChoice] = [.simulator]
+        for device in model.audioInputDevices {
+            choices += (0..<device.channelCount).map { .ltc(deviceUID: device.uid, channel: $0) }
         }
+        choices += model.midiSources.map { .mtc(sourceID: $0.uniqueID) }
+        choices += model.networkInterfaces.map { .artNet(interface: $0.name) }
+        choices.append(.artNet(interface: nil))
+        if let current, !choices.contains(current) { choices.append(current) }
+        return choices
     }
 }
 
@@ -321,7 +378,7 @@ struct SimulatorControlsView: View {
         }
         .padding(20)
         // Disabled controls already dim themselves; extra opacity would dim them twice.
-        .disabled(model.source != .simulator)
+        .disabled(model.source != .simulator && model.backupSource != .simulator)
     }
 }
 

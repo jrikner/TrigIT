@@ -22,6 +22,21 @@ public struct TimecodeReading: Hashable, Sendable {
     }
 }
 
+/// Which of the two Timecode Sources a reading came from: the Primary Source
+/// the show follows while it is healthy, or the optional Backup Source.
+public enum SourceRole: String, Hashable, Sendable, CaseIterable {
+    case primary
+    case backup
+}
+
+/// A timecode problem the operator must see.
+public enum TimecodeAlert: Hashable, Sendable {
+    /// The Primary Source is lost and the show is following the Backup Source.
+    case primaryLostRunningOnBackup
+    /// No Timecode Source is healthy, and timecode has not (yet) Stopped.
+    case allTimecodeLost
+}
+
 /// Something the Show Engine reports to the outside world.
 public enum EngineEvent: Hashable, Sendable {
     /// The Playhead moved to a new position.
@@ -47,6 +62,12 @@ public enum EngineEvent: Hashable, Sendable {
     case missingDestination(song: SongID, action: ActionID)
     /// The Armed state changed.
     case armedChanged(Bool)
+    /// A Timecode Source started or stopped sending timecode.
+    case sourceHealthChanged(SourceRole, healthy: Bool)
+    /// The engine now follows this Timecode Source.
+    case liveSourceChanged(SourceRole)
+    /// The timecode alert changed (nil: the problem is resolved).
+    case alertChanged(TimecodeAlert?)
 }
 
 /// Why a Song fired.
@@ -104,6 +125,8 @@ public struct ShowEngine: Sendable {
     /// A gap in timecode longer than this (but shorter than the Stop time) is
     /// reported as a Dropout. Shorter gaps are ordinary jitter.
     public static let dropoutThreshold = 0.2
+    /// A Timecode Source with no reading for longer than this is lost.
+    public static let sourceLossTime = 0.25
 
     public private(set) var set: ShowSet
     public private(set) var playhead: Timecode?
@@ -116,7 +139,20 @@ public struct ShowEngine: Sendable {
     /// True from a Stop until timecode comes back.
     public private(set) var isStopped = false
 
+    /// The Timecode Source being followed. It changes only when it is lost
+    /// while the other is healthy, and returns to the Primary on a Stop.
+    public private(set) var liveSource: SourceRole = .primary
+    public private(set) var alert: TimecodeAlert?
+
+    /// The last reading followed, from the live source.
     private var lastReading: TimecodeReading?
+    /// The last reading from each source, followed or not.
+    private var lastReadings: [SourceRole: TimecodeReading] = [:]
+    private var healthySources: Swift.Set<SourceRole> = []
+    /// When timecode last started arriving after silence or a Stop. A source
+    /// only counts as lost once timecode has been flowing for `sourceLossTime`,
+    /// so two sources resuming together a few ms apart never cause a switch.
+    private var resumedAt: Double?
 
     public init(set: ShowSet = ShowSet(), armed: Bool = false) {
         self.set = set
@@ -135,8 +171,34 @@ public struct ShowEngine: Sendable {
         set = newSet
     }
 
-    /// Feeds one timecode reading and returns what happened, in order.
-    public mutating func handle(_ reading: TimecodeReading) -> [EngineEvent] {
+    /// Feeds one timecode reading from the Primary or Backup Source and
+    /// returns what happened, in order. Only the live source moves the
+    /// Playhead; if the live source is lost while this one is healthy, this one
+    /// becomes live, carrying on from where the lost one was: no Stop, no
+    /// Dropout and no re-firing.
+    public mutating func handle(_ reading: TimecodeReading, from role: SourceRole = .primary) -> [EngineEvent] {
+        var events: [EngineEvent] = []
+        let previous = lastReadings[role]
+        lastReadings[role] = reading
+        if resumedAt == nil { resumedAt = reading.timestamp }
+
+        if role != liveSource {
+            guard isLost(liveSource, at: reading.timestamp) else {
+                return events + updateHealth(at: reading.timestamp)
+            }
+            liveSource = role
+            events.append(.liveSourceChanged(role))
+            // If this source has been running all along, follow on from its own
+            // last reading, so the switch is seamless.
+            if let previous, reading.timestamp - previous.timestamp <= Self.sourceLossTime {
+                lastReading = previous
+            }
+        }
+        events += follow(reading)
+        return events + updateHealth(at: reading.timestamp)
+    }
+
+    private mutating func follow(_ reading: TimecodeReading) -> [EngineEvent] {
         var events: [EngineEvent] = []
 
         if reading.frameRate != frameRate {
@@ -188,15 +250,57 @@ public struct ShowEngine: Sendable {
     /// longer than the Set's Stop time, that is a Stop: the current Song Ends
     /// and is re-armed, so timecode resuming inside it fires it again.
     public mutating func tick(at time: Double) -> [EngineEvent] {
-        guard !isStopped, let last = lastReading, time - last.timestamp > set.stopTime else { return [] }
+        guard !isStopped, let last = lastReading, time - last.timestamp > set.stopTime else {
+            return updateHealth(at: time)
+        }
         isStopped = true
         // After a Stop, the next reading starts afresh: neither a Jump nor a Dropout.
         lastReading = nil
+        resumedAt = nil
         var events: [EngineEvent] = [.stopped]
         if let current = currentSongID {
             events += end(current, cause: .stop)
             currentSongID = nil
             events.append(.currentSongChanged(nil))
+        }
+        // A Stop returns the show to the Primary Source.
+        if liveSource != .primary {
+            liveSource = .primary
+            events.append(.liveSourceChanged(.primary))
+        }
+        return events + updateHealth(at: time)
+    }
+
+    private func isHealthy(_ role: SourceRole, at time: Double) -> Bool {
+        lastReadings[role].map { time - $0.timestamp <= Self.sourceLossTime } ?? false
+    }
+
+    private func isLost(_ role: SourceRole, at time: Double) -> Bool {
+        guard let resumedAt, time - resumedAt > Self.sourceLossTime else { return false }
+        return !isHealthy(role, at: time)
+    }
+
+    /// Reports sources going healthy or lost, and the alert that follows.
+    private mutating func updateHealth(at time: Double) -> [EngineEvent] {
+        var events: [EngineEvent] = []
+        for role in SourceRole.allCases {
+            let healthy = isHealthy(role, at: time)
+            guard healthy != healthySources.contains(role) else { continue }
+            if healthy { healthySources.insert(role) } else { healthySources.remove(role) }
+            events.append(.sourceHealthChanged(role, healthy: healthy))
+        }
+        let newAlert: TimecodeAlert?
+        if healthySources.isEmpty {
+            // Silence after a Stop, or before any timecode, is normal.
+            newAlert = isStopped || resumedAt == nil ? nil : .allTimecodeLost
+        } else if liveSource == .backup, !healthySources.contains(.primary) {
+            newAlert = .primaryLostRunningOnBackup
+        } else {
+            newAlert = nil
+        }
+        if newAlert != alert {
+            alert = newAlert
+            events.append(.alertChanged(newAlert))
         }
         return events
     }
