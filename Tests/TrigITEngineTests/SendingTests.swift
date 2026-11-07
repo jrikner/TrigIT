@@ -112,3 +112,23 @@ final class MIDIActionSendingTests: XCTestCase {
         XCTAssertTrue(ShowSet(songs: [song], destinations: [ma3]).isInUse(ma3.id))
     }
 }
+
+final class DMXActionTests: XCTestCase {
+    func testListsTheUniversesInUsePerDestination() {
+        let ma3 = Destination(id: DestinationID(rawValue: 1), name: "MA3", host: "2.255.255.255", port: 0, dmxOutput: .artNet)
+        let lights = Destination(id: DestinationID(rawValue: 2), name: "Lights", host: "", port: 0, dmxOutput: .sACNMulticast)
+        func pulse(_ destination: Destination, _ universe: Int) -> Action {
+            Action(destinationID: destination.id, message: .dmxPulse(DMXPulse(universe: universe, channel: 1)))
+        }
+        let set = ShowSet(songs: [
+            Song(name: "A", start: tc("01:00:00:00"), end: tc("01:01:00:00"), startActions: [pulse(ma3, 0), pulse(lights, 5)]),
+            Song(name: "B", start: tc("02:00:00:00"), end: tc("02:01:00:00"), stopActions: [pulse(ma3, 3), pulse(ma3, 0)]),
+        ], destinations: [ma3, lights])
+        XCTAssertEqual(set.dmxUniversesInUse, [ma3.id: [0, 3], lights.id: [5]])
+    }
+
+    func testUniverseRangesFollowTheProtocol() {
+        XCTAssertEqual(DMXOutput.artNet.universeRange, 0...32_767)
+        XCTAssertEqual(DMXOutput.sACNMulticast.universeRange, 1...63_999)
+    }
+}

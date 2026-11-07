@@ -20,6 +20,7 @@ struct DestinationsView: View {
                 Text("Port").frame(width: 64, alignment: .leading)
                 Text("Network interface").frame(width: 170, alignment: .leading)
                 Text("MIDI output").frame(width: 170, alignment: .leading)
+                Text("DMX").frame(width: 140, alignment: .leading)
                 Spacer().frame(width: 24)
             }
             .font(.caption)
@@ -95,6 +96,16 @@ struct DestinationRow: View {
             .labelsHidden()
             .frame(width: 170)
             .help("For MIDI note and MIDI Show Control Actions")
+
+            Picker("", selection: binding(\.dmxOutput)) {
+                Text("None").tag(DMXOutput?.none)
+                ForEach(DMXOutput.allCases, id: \.self) { output in
+                    Text(output.name).tag(DMXOutput?.some(output))
+                }
+            }
+            .labelsHidden()
+            .frame(width: 140)
+            .help("For pulse Actions. Art-Net goes to the address (a node, or a broadcast address such as 2.255.255.255); sACN multicast ignores it; sACN unicast uses it. Both use the chosen network interface.")
 
             Button(role: .destructive) {
                 model.deleteDestination(destination.id)
