@@ -63,12 +63,20 @@ _Avoid_: Exit actions, release, off-cue
 A named device that Actions are sent to, such as "Resolume" or "MA3", holding its network address and/or MIDI port. Each Action names one Destination.
 _Avoid_: Endpoint, target, output, device
 
+**Start Note**:
+An optional incoming MIDI note (channel and note number) that makes a Song Enter without timecode, for example a DJ pull-up triggered from Ableton.
+_Avoid_: Trigger note, MIDI cue
+
+**Stop Note**:
+An optional incoming MIDI note that makes a Song End, for example the "stop the set" sound of a DJ pull-up.
+_Avoid_: Release note, off note
+
 **Entering**:
-The Playhead arriving inside a Song's span from outside it, by playing into it or by a Jump landing anywhere inside it.
+A Song becoming the current Song: the Playhead arriving inside its span from outside it (by playing in or by a Jump landing anywhere inside it), or its Start Note arriving while it is not current.
 _Avoid_: Hitting, reaching
 
 **Ending**:
-A Song being left by a Stop while the Playhead is inside it, or by the Playhead playing on past its end time. A Jump out of a Song is not Ending.
+The current Song finishing: a Stop while it is current, the Playhead playing on past its end time, or its Stop Note arriving. A Jump out of a Song is not Ending. A Song Ends at most once per Entering.
 _Avoid_: Exiting, leaving, release
 
 **Firing**:
