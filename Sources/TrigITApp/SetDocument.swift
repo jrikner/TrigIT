@@ -22,6 +22,7 @@ extension ShowModel {
 
     static let setFileType = UTType(filenameExtension: SetFile.fileExtension, conformingTo: .json) ?? .json
     private static let lastDocumentKey = "TrigIT.lastDocument"
+    private static let quitCleanlyKey = "TrigIT.quitCleanly"
     private static let recentDocumentsKey = "TrigIT.recentDocuments"
     private static let maxRecentDocuments = 10
     /// Changes are written this long after the last edit (and at once on quit).
@@ -36,17 +37,26 @@ extension ShowModel {
 
     // MARK: Opening
 
-    /// At launch: reopen the last Set; on the very first launch, create an example Set.
+    /// At launch: after a crash or a forced quit (TrigIT may have died
+    /// mid-show), reopen the last Set straight away; otherwise show the
+    /// welcome screen.
     func openLastDocument() {
         recentDocuments = (UserDefaults.standard.stringArray(forKey: Self.recentDocumentsKey) ?? [])
             .map { URL(fileURLWithPath: $0) }
         // The app delegate saves through this on quit, synchronously.
         ShowModel.current = self
-        if let path = UserDefaults.standard.string(forKey: Self.lastDocumentKey) {
+        let quitCleanly = UserDefaults.standard.object(forKey: Self.quitCleanlyKey) as? Bool ?? true
+        UserDefaults.standard.set(false, forKey: Self.quitCleanlyKey)
+        if !quitCleanly, let path = UserDefaults.standard.string(forKey: Self.lastDocumentKey) {
             open(URL(fileURLWithPath: path))
         } else {
             showingWelcome = true
         }
+    }
+
+    /// Called on a normal quit, so the next launch shows the welcome screen.
+    static func markQuitCleanly() {
+        UserDefaults.standard.set(true, forKey: quitCleanlyKey)
     }
 
     func open(_ url: URL) {
