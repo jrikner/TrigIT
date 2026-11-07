@@ -10,6 +10,8 @@ enum TimecodeSourceChoice: Hashable {
     case ltc(deviceUID: String, channel: Int)
     /// MTC from a MIDI source, remembered by its Core MIDI unique ID.
     case mtc(sourceID: Int32)
+    /// Art-Net Timecode on a network interface (BSD name), or on any interface if nil.
+    case artNet(interface: String?)
 }
 
 /// Connects the pure Show Engine, the Timecode Sources and the network sender
@@ -48,6 +50,7 @@ final class ShowModel: ObservableObject {
     private let midiInput = MIDIInput()
     private var midiParser = MIDIParser()
     private var mtcDecoder = MTCDecoder()
+    private let artNetInput = ArtNetTimecodeInput()
     private var timer: Timer?
     private var lastFedTimecode: Timecode?
     private var lastReadingTime: Double?
@@ -60,13 +63,14 @@ final class ShowModel: ObservableObject {
     init(set: ShowSet = ShowModel.exampleSet) {
         self.set = set
         self.engine = ShowEngine(set: set, armed: false)
-        sender.onInterfacesChanged = { [weak self] interfaces in self?.networkInterfaces = interfaces }
+        sender.onInterfacesChanged = { [weak self] interfaces in self?.networkInterfacesChanged(interfaces) }
         audioDevices.onChange = { [weak self] in self?.audioDevicesChanged() }
         ltcInput.onFrame = { [weak self] frame, time in self?.receive(frame, at: time) }
         audioInputDevices = audioDevices.inputDevices()
         midiInput.onSourcesChanged = { [weak self] in self?.midiSourcesChanged() }
         midiInput.onBytes = { [weak self] bytes, time in self?.receiveMIDI(bytes, at: time) }
         midiSources = midiInput.sources()
+        artNetInput.onPacket = { [weak self] packet, time in self?.receiveArtNet(packet, at: time) }
         if let status = midiInput.startError { record("MIDI is unavailable (error \(status))", isError: true) }
         startClock()
     }
@@ -168,6 +172,7 @@ final class ShowModel: ObservableObject {
         source = choice
         ltcInput.stop()
         midiInput.disconnect()
+        artNetInput.stop()
         isReceiving = false
         lastReadingTime = nil
         lastFedTimecode = nil
@@ -180,6 +185,9 @@ final class ShowModel: ObservableObject {
         case .mtc:
             record("Timecode Source: \(sourceLabel(choice))")
             startMTC()
+        case .artNet:
+            record("Timecode Source: \(sourceLabel(choice))")
+            startArtNet()
         }
     }
 
@@ -192,7 +200,26 @@ final class ShowModel: ObservableObject {
             return "LTC: \(name), channel \(channel + 1)"
         case .mtc(let id):
             return "MTC: \(midiSources.first { $0.uniqueID == id }?.name ?? "missing MIDI source")"
+        case .artNet(let interface):
+            guard let interface else { return "Art-Net Timecode: any network interface" }
+            let label = networkInterfaces.first { $0.name == interface }?.label ?? "\(interface) (not available)"
+            return "Art-Net Timecode: \(label)"
         }
+    }
+
+    private func startArtNet() {
+        guard case .artNet(let interface) = source else { return }
+        do {
+            try artNetInput.start(interface: interface)
+        } catch {
+            record("Art-Net Timecode input failed: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    private func receiveArtNet(_ packet: [UInt8], at time: Double) {
+        guard case .artNet = source, let artTimeCode = ArtTimeCode(packet: packet),
+              let timecode = Timecode(artTimeCode.fields) else { return }
+        feed(TimecodeReading(timecode: timecode, frameRate: artTimeCode.frameRate, source: .artNet, timestamp: time))
     }
 
     private func startMTC() {
@@ -229,6 +256,13 @@ final class ShowModel: ObservableObject {
                 self?.record("LTC input failed: \(error.localizedDescription)", isError: true)
             }
         }
+    }
+
+    private func networkInterfacesChanged(_ interfaces: [NetworkInterfaceInfo]) {
+        let names = Set(networkInterfaces.map(\.name))
+        networkInterfaces = interfaces
+        // An interface came or went: rebind so a replugged cable is picked up again.
+        if case .artNet = source, names != Set(interfaces.map(\.name)) { startArtNet() }
     }
 
     private func audioDevicesChanged() {

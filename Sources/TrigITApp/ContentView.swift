@@ -109,7 +109,7 @@ struct SourceBadge: View {
                 badge("SIMULATOR", color: .orange)
                 Text(model.simulator.isPlaying ? "Playing" : "Stopped")
                     .foregroundColor(.secondary)
-            case .ltc, .mtc:
+            case .ltc, .mtc, .artNet:
                 badge(sourceKind, color: .green)
                 if model.isReceiving {
                     Text("Receiving").foregroundColor(.secondary)
@@ -123,8 +123,11 @@ struct SourceBadge: View {
     }
 
     private var sourceKind: String {
-        if case .mtc = model.source { return "MTC" }
-        return "LTC"
+        switch model.source {
+        case .mtc: return "MTC"
+        case .artNet: return "ART-NET TC"
+        default: return "LTC"
+        }
     }
 
     private func badge(_ text: String, color: Color) -> some View {
@@ -156,6 +159,12 @@ struct SourcePicker: View {
                 Text("MTC: \(source.name)")
                     .tag(TimecodeSourceChoice.mtc(sourceID: source.uniqueID))
             }
+            ForEach(model.networkInterfaces) { interface in
+                Text("Art-Net Timecode: \(interface.label)")
+                    .tag(TimecodeSourceChoice.artNet(interface: interface.name))
+            }
+            Text("Art-Net Timecode: any network interface")
+                .tag(TimecodeSourceChoice.artNet(interface: nil))
             // Keep a chosen device that is unplugged visible rather than silently switching.
             if isMissing {
                 Text(model.sourceLabel(model.source))
@@ -170,6 +179,9 @@ struct SourcePicker: View {
         case .simulator: return false
         case .ltc(let uid, _): return !model.audioInputDevices.contains { $0.uid == uid }
         case .mtc(let id): return !model.midiSources.contains { $0.uniqueID == id }
+        case .artNet(let interface):
+            guard let interface else { return false }
+            return !model.networkInterfaces.contains { $0.name == interface }
         }
     }
 }
