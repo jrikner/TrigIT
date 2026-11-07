@@ -309,12 +309,14 @@ struct ActionRow: View {
                 MIDINoteFields(note: note) { update(.midiNote($0)) }
             case .msc(let command):
                 MSCFields(command: command) { update(.msc($0)) }
+            case .dmxPulse(let pulse):
+                DMXPulseFields(pulse: pulse) { update(.dmxPulse($0)) }
             }
 
-            if action.message.isMIDI, model.set.destination(action.destinationID)?.midiOutput == nil {
+            if let problem = transportProblem {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)
-                    .help("This Destination has no MIDI output; set one in the Destinations tab")
+                    .help(problem)
             }
 
             Button(role: .destructive) {
@@ -324,6 +326,23 @@ struct ActionRow: View {
             }
             .buttonStyle(.borderless)
             .help("Delete this Action")
+        }
+    }
+
+    /// Why this Action's Destination can't carry it, if it can't.
+    private var transportProblem: String? {
+        guard let destination = model.set.destination(action.destinationID) else { return nil }
+        switch action.message {
+        case .osc:
+            return nil
+        case .midiNote, .msc:
+            return destination.midiOutput == nil ? "This Destination has no MIDI output; set one in the Destinations tab" : nil
+        case .dmxPulse(let pulse):
+            guard let output = destination.dmxOutput else {
+                return "This Destination has no Art-Net or sACN output; set one in the Destinations tab"
+            }
+            return output.universeRange.contains(pulse.universe)
+                ? nil : "Universe \(pulse.universe) is outside \(output.name)'s range \(output.universeRange.lowerBound)-\(output.universeRange.upperBound)"
         }
     }
 
@@ -445,6 +464,34 @@ struct MSCFields: View {
                 .foregroundColor(.red)
                 .help("Cue and list must be numbers like 5 or 12.5, and a list needs a cue")
         }
+    }
+}
+
+struct DMXPulseFields: View {
+    let pulse: DMXPulse
+    let onChange: (DMXPulse) -> Void
+
+    var body: some View {
+        Text("Univ").foregroundColor(.secondary)
+        NumberField(value: pulse.universe, range: 0...63_999, width: 52) { universe in
+            onChange(DMXPulse(universe: universe, channel: pulse.channel, value: pulse.value, duration: pulse.duration))
+        }
+        .help("Art-Net: port-address 0-32767. sACN: universe 1-63999.")
+        Text("Ch").foregroundColor(.secondary)
+        NumberField(value: pulse.channel, range: 1...512, width: 40) { channel in
+            onChange(DMXPulse(universe: pulse.universe, channel: channel, value: pulse.value, duration: pulse.duration))
+        }
+        Text("=").foregroundColor(.secondary)
+        NumberField(value: Int(pulse.value), range: 0...255, width: 40) { value in
+            onChange(DMXPulse(universe: pulse.universe, channel: pulse.channel, value: UInt8(value), duration: pulse.duration))
+        }
+        Text("for").foregroundColor(.secondary)
+        NumberField(value: Int((pulse.duration * 1000).rounded()), range: 50...10_000, width: 52) { milliseconds in
+            onChange(DMXPulse(universe: pulse.universe, channel: pulse.channel, value: pulse.value,
+                              duration: Double(milliseconds) / 1000))
+        }
+        Text("ms").foregroundColor(.secondary)
+        Spacer(minLength: 0)
     }
 }
 

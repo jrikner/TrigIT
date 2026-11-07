@@ -29,7 +29,10 @@ final class ShowModel: ObservableObject {
         let isError: Bool
     }
 
-    @Published private(set) var set: ShowSet
+    @Published private(set) var set: ShowSet {
+        // Keep streaming exactly the DMX universes the Set uses.
+        didSet { dmxStreamer.update(for: set) }
+    }
     @Published private(set) var playhead: Timecode?
     @Published private(set) var frameRate: FrameRate?
     @Published private(set) var currentSongID: SongID?
@@ -60,6 +63,7 @@ final class ShowModel: ObservableObject {
     private let ltcInput = LTCAudioInput()
     private let midiInput = MIDIInput()
     private let midiOutput = MIDIOutput()
+    private let dmxStreamer = DMXStreamer()
     private var midiParser = MIDIParser()
     private var mtcDecoder = MTCDecoder()
     private let artNetInput = ArtNetTimecodeInput()
@@ -87,6 +91,8 @@ final class ShowModel: ObservableObject {
             self.midiOutputs = self.midiOutput.outputs()
         }
         midiOutputs = midiOutput.outputs()
+        dmxStreamer.onError = { [weak self] message in self?.record(message, isError: true) }
+        dmxStreamer.update(for: set)
         artNetInput.onPacket = { [weak self] packet, time in self?.receiveArtNet(packet, at: time) }
         if let status = midiInput.startError { record("MIDI is unavailable (error \(status))", isError: true) }
         startClock()
@@ -193,13 +199,14 @@ final class ShowModel: ObservableObject {
 
     /// The kinds of Action the editor can add.
     enum NewActionKind: CaseIterable {
-        case osc, midiNote, msc
+        case osc, midiNote, msc, dmxPulse
 
         var label: String {
             switch self {
             case .osc: return "OSC message"
             case .midiNote: return "MIDI note"
             case .msc: return "MIDI Show Control"
+            case .dmxPulse: return "Art-Net / sACN pulse"
             }
         }
 
@@ -208,16 +215,24 @@ final class ShowModel: ObservableObject {
             case .osc: return .osc(OSCMessage(address: "/"))
             case .midiNote: return .midiNote(MIDINote(channel: 0, note: 60))
             case .msc: return .msc(MSCCommand(command: .go, cue: "1"))
+            case .dmxPulse: return .dmxPulse(DMXPulse(universe: 1, channel: 1))
+            }
+        }
+
+        /// Whether a Destination has what this kind of Action needs.
+        func canUse(_ destination: Destination) -> Bool {
+            switch self {
+            case .osc: return true
+            case .midiNote, .msc: return destination.midiOutput != nil
+            case .dmxPulse: return destination.dmxOutput != nil
             }
         }
     }
 
     func addAction(_ kind: NewActionKind, to songID: SongID, list: ActionList) {
         guard var song = song(songID) else { return }
-        // Prefer a Destination that can carry it: one with a MIDI output for MIDI.
-        let destination = kind == .osc
-            ? set.destinations.first
-            : set.destinations.first { $0.midiOutput != nil } ?? set.destinations.first
+        // Prefer a Destination that can carry it: a MIDI output for MIDI, DMX for pulses.
+        let destination = set.destinations.first { kind.canUse($0) } ?? set.destinations.first
         guard let destination else { return }
         song[keyPath: list.keyPath].append(Action(destinationID: destination.id, message: kind.message))
         update(song)
@@ -538,6 +553,13 @@ final class ShowModel: ObservableObject {
                 return
             }
             sendMIDI(summary, to: destination) { try midiOutput.send(command.encoded, to: $0) }
+        case .dmxPulse(let pulse):
+            do {
+                try dmxStreamer.play(pulse, to: destination)
+                record(summary)
+            } catch {
+                record("\(summary) not sent: \(error.localizedDescription)", isError: true)
+            }
         }
     }
 
@@ -563,6 +585,8 @@ final class ShowModel: ObservableObject {
             return "Note \(note.noteName) (\(note.note)) ch \(note.channel + 1) vel \(note.velocity)"
         case .msc(let command):
             return command.summary
+        case .dmxPulse(let pulse):
+            return pulse.summary
         }
     }
 

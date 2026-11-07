@@ -62,15 +62,42 @@ public struct Destination: Identifiable, Hashable, Sendable, Codable {
     public var networkInterface: String?
     /// The MIDI output for MIDI Actions, if any.
     public var midiOutput: MIDIPortReference?
+    /// How DMX pulse Actions reach this Destination, if any. Uses `host` and
+    /// `networkInterface`, but not `port`: Art-Net and sACN have fixed ports.
+    public var dmxOutput: DMXOutput?
 
     public init(id: DestinationID = DestinationID(), name: String, host: String, port: UInt16,
-                networkInterface: String? = nil, midiOutput: MIDIPortReference? = nil) {
+                networkInterface: String? = nil, midiOutput: MIDIPortReference? = nil, dmxOutput: DMXOutput? = nil) {
         self.id = id
         self.name = name
         self.host = host
         self.port = port
         self.networkInterface = networkInterface
         self.midiOutput = midiOutput
+        self.dmxOutput = dmxOutput
+    }
+}
+
+/// The DMX-over-network protocol a Destination receives pulses with.
+public enum DMXOutput: Hashable, Sendable, Codable, CaseIterable {
+    /// Art-Net to `host`: a node's own address, or a broadcast address such as 2.255.255.255.
+    case artNet
+    /// sACN to each universe's multicast group (239.255.x.y).
+    case sACNMulticast
+    /// sACN straight to `host`.
+    case sACNUnicast
+
+    public var name: String {
+        switch self {
+        case .artNet: return "Art-Net"
+        case .sACNMulticast: return "sACN multicast"
+        case .sACNUnicast: return "sACN unicast"
+        }
+    }
+
+    /// Universe numbers this protocol can address.
+    public var universeRange: ClosedRange<Int> {
+        self == .artNet ? ArtDmxPacket.portAddressRange : SACNDataPacket.universeRange
     }
 }
 
@@ -95,11 +122,15 @@ public struct Action: Identifiable, Hashable, Sendable, Codable {
         case midiNote(MIDINote)
         /// MIDI Show Control SysEx to the Destination's MIDI output.
         case msc(MSCCommand)
+        /// A value on one DMX channel for a moment, over the Destination's Art-Net or sACN.
+        case dmxPulse(DMXPulse)
 
         /// Whether it goes out over MIDI rather than the network.
         public var isMIDI: Bool {
-            if case .osc = self { return false }
-            return true
+            switch self {
+            case .midiNote, .msc: return true
+            case .osc, .dmxPulse: return false
+            }
         }
     }
 
@@ -147,6 +178,20 @@ public struct ShowSet: Hashable, Sendable, Codable {
 
     public func destination(_ id: DestinationID) -> Destination? {
         destinations.first { $0.id == id }
+    }
+
+    /// Every universe some pulse Action uses, per Destination. These are
+    /// streamed continuously so receivers never see the source disappear.
+    public var dmxUniversesInUse: [DestinationID: Swift.Set<Int>] {
+        var universes: [DestinationID: Swift.Set<Int>] = [:]
+        for song in songs {
+            for action in song.startActions + song.stopActions {
+                if case .dmxPulse(let pulse) = action.message {
+                    universes[action.destinationID, default: []].insert(pulse.universe)
+                }
+            }
+        }
+        return universes
     }
 
     /// Whether any Song has an Action sending to the Destination.

@@ -47,3 +47,7 @@ Pick "Art-Net Timecode: interface" as the Timecode Source. TrigIT listens on UDP
 ## MIDI output
 
 Give a Destination a MIDI output (Destinations tab): a physical port, a network MIDI session or an IAC bus. Its Actions can then be MIDI notes (Note On, then Note Off 100 ms later, released at once on disarm or quit) or MIDI Show Control GO/STOP/RESUME with a cue and list. One Destination can have both a network address for OSC and a MIDI output.
+
+## Art-Net and sACN pulses
+
+Give a Destination a DMX output (Destinations tab): Art-Net to its address (a node, or a broadcast address such as 2.255.255.255), sACN multicast, or sACN unicast to its address, through its chosen network interface. Pulse Actions set one channel (default 255) for a time (default 0.5 s), then 0. Every universe a pulse Action uses is streamed 30 times a second from launch until quit, with zeros at rest, so receivers such as the grandMA3's DMX remote inputs never see the source disappear.
