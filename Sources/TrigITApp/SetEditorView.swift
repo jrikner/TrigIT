@@ -287,15 +287,37 @@ struct ActionsEditor: View {
             Text("Drag to reorder. Arguments: 1 is an int, 0.5 a float, text a string; \"quote\" strings with spaces.")
                 .font(.caption)
                 .foregroundColor(.secondary)
-            List {
-                ForEach(song[keyPath: list.keyPath]) { action in
-                    ActionRow(songID: song.id, action: action)
+            // Not a List: on macOS a List row takes the click, so the text
+            // fields in an Action row never get keyboard focus. Rows reorder
+            // by dragging the handle instead of List's onMove.
+            ScrollView {
+                VStack(alignment: .leading) {
+                    let actions = song[keyPath: list.keyPath]
+                    ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+                        HStack {
+                            Image(systemName: "line.3.horizontal")
+                                .foregroundColor(.secondary)
+                                .help("Drag to reorder")
+                                .accessibilityHidden(true)
+                                .draggable(String(action.id.rawValue))
+                            ActionRow(songID: song.id, action: action)
+                        }
+                        // A row wider than the pane is cut off on the right, as in a List.
+                        .lineLimit(1)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                         .disabled(model.isShowLocked)
+                        .dropDestination(for: String.self) { items, _ in
+                            guard let raw = items.first.flatMap(UInt64.init),
+                                  let from = actions.firstIndex(where: { $0.id.rawValue == raw }),
+                                  from != index else { return false }
+                            // The dropped Action takes this row's place.
+                            model.moveActions(in: song.id, list: list, from: [from], to: from < index ? index + 1 : index)
+                            return true
+                        }
+                    }
                 }
-                // No dragging to reorder while Show Lock is on.
-                .onMove(perform: model.isShowLocked ? nil : { offsets, destination in
-                    model.moveActions(in: song.id, list: list, from: offsets, to: destination)
-                })
+                .padding(.horizontal, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .sheet(isPresented: $showingPresets) {
