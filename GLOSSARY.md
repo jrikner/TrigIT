@@ -44,7 +44,7 @@ The show: an ordered list of Songs, each with its own span of timecode.
 _Avoid_: Show file, playlist, cue list
 
 **Song**:
-One piece of music in the Set, owning a span of timecode from a start to an end time, its Start Actions and its optional Stop Actions. Timecode between Songs belongs to no Song.
+One piece of music in the Set, with its Start Actions and optional Stop Actions, and at least one way to be triggered: a span of timecode (start to end time), a Start Note, a Stop Note, or any combination. Timecode outside every span belongs to no Song.
 _Avoid_: Track (clashes with Ableton's tracks), cue, scene
 
 **Action**:
@@ -68,7 +68,7 @@ An optional incoming MIDI note (channel and note number) that makes a Song Enter
 _Avoid_: Trigger note, MIDI cue
 
 **Stop Note**:
-An optional incoming MIDI note that makes a Song End, for example the "stop the set" sound of a DJ pull-up.
+An optional incoming MIDI note that makes its Song End if it is current. A Song with only a Stop Note sends its Stop Actions every time the note arrives.
 _Avoid_: Release note, off note
 
 **Entering**:
