@@ -5,6 +5,8 @@ import TrigITEngine
 public struct SetVersion: Hashable, Sendable {
     public var url: URL
     public var date: Date
+    /// Whether TrigIT was Armed while this was the current version.
+    public var usedInShow: Bool = false
 }
 
 /// Keeps earlier versions of Sets in a folder of its own (normally in
@@ -31,6 +33,7 @@ public struct SetVersionStore: Sendable {
         try SetFile.write(set, to: url)
         for old in versions(of: set.id).dropFirst(limit) {
             try? FileManager.default.removeItem(at: old.url)
+            try? FileManager.default.removeItem(at: old.url.deletingPathExtension().appendingPathExtension("used"))
         }
         return SetVersion(url: url, date: Date(timeIntervalSince1970: Double(milliseconds) / 1000))
     }
@@ -41,9 +44,16 @@ public struct SetVersionStore: Sendable {
         return files.compactMap { url -> SetVersion? in
             guard url.pathExtension == SetFile.fileExtension,
                   let milliseconds = Int64(url.deletingPathExtension().lastPathComponent) else { return nil }
-            return SetVersion(url: url, date: Date(timeIntervalSince1970: Double(milliseconds) / 1000))
+            let used = FileManager.default.fileExists(atPath: url.deletingPathExtension().appendingPathExtension("used").path)
+            return SetVersion(url: url, date: Date(timeIntervalSince1970: Double(milliseconds) / 1000), usedInShow: used)
         }
         .sorted { $0.date > $1.date }
+    }
+
+    /// Marks a version as having been current while TrigIT was Armed, with an
+    /// empty file next to it.
+    public func markUsedInShow(_ version: SetVersion) {
+        FileManager.default.createFile(atPath: version.url.deletingPathExtension().appendingPathExtension("used").path, contents: nil)
     }
 
     private func folder(for id: SetID) -> URL {

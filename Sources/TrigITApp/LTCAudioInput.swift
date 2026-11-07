@@ -100,6 +100,8 @@ final class LTCAudioInput {
     /// time (seconds, same clock as `ProcessInfo.systemUptime`) at which the
     /// frame started.
     var onFrame: ((LTCFrame, Double) -> Void)?
+    /// The input's peak level (0...1), about ten times a second.
+    var onLevel: ((Float) -> Void)?
 
     private var engine: AVAudioEngine?
 
@@ -144,6 +146,8 @@ final class LTCAudioInput {
         // The decoder and its sample counter live on the audio thread only.
         var decoder = LTCDecoder(sampleRate: sampleRate)
         var samplesFed = 0
+        var peak: Float = 0
+        var buffersSinceLevel = 0
         input.installTap(onBus: 0, bufferSize: 512, format: format) { [weak self] buffer, time in
             guard let channels = buffer.floatChannelData else { return }
             let count = Int(buffer.frameLength)
@@ -152,7 +156,16 @@ final class LTCAudioInput {
             let bufferTime = time.isHostTimeValid
                 ? AVAudioTime.seconds(forHostTime: time.hostTime)
                 : ProcessInfo.processInfo.systemUptime - Double(count) / sampleRate
-            let frames = decoder.decode(Array(UnsafeBufferPointer(start: channels[channel], count: count)))
+            let samples = Array(UnsafeBufferPointer(start: channels[channel], count: count))
+            peak = max(peak, samples.reduce(0) { max($0, abs($1)) })
+            buffersSinceLevel += 1
+            if buffersSinceLevel >= 8 {
+                let level = min(peak, 1)
+                peak = 0
+                buffersSinceLevel = 0
+                DispatchQueue.main.async { self?.onLevel?(level) }
+            }
+            let frames = decoder.decode(samples)
             guard !frames.isEmpty else { return }
             let stamped = frames.map { ($0, bufferTime + Double($0.startSample - bufferStart) / sampleRate) }
             DispatchQueue.main.async {

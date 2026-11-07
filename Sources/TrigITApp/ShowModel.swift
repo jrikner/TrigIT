@@ -4,6 +4,7 @@ import SwiftUI // for MutableCollection.move(fromOffsets:toOffset:)
 import TrigITEngine
 import TrigITProtocols
 import TrigITStorage
+import UniformTypeIdentifiers
 
 /// The Timecode Source the show follows.
 enum TimecodeSourceChoice: Hashable, Codable {
@@ -33,11 +34,32 @@ enum TimecodeSourceChoice: Hashable, Codable {
 final class ShowModel: ObservableObject {
     /// One line in the fire log.
     struct LogEntry: Identifiable {
+        enum Kind: String, CaseIterable {
+            case fired = "Fired", sent = "Sent", failed = "Failed", dropout = "Dropout", stop = "Stop"
+            case failover = "Failover", armed = "Armed", disarmed = "Disarmed", info = "Info", problem = "Problem"
+        }
         let id = UUID()
         let date = Date()
         let timecode: Timecode?
         let text: String
-        let isError: Bool
+        let kind: Kind
+        var isError: Bool { kind == .failed || kind == .problem || kind == .dropout }
+    }
+
+    /// How the last send of an Action went. Kept for this session only, not in the Set file.
+    struct SendResult: Equatable {
+        let date: Date
+        let timecode: Timecode?
+        let ok: Bool
+        let errorText: String?
+    }
+
+    /// The last time a Song fired, for the Show screen's status bar.
+    struct Firing: Equatable {
+        let songID: SongID
+        let date: Date
+        let actionIDs: [ActionID]
+        let sent: Bool
     }
 
     @Published private(set) var set: ShowSet {
@@ -74,6 +96,20 @@ final class ShowModel: ObservableObject {
     @Published private(set) var isShowLocked = false
     /// The last Song edit refused because it would overlap other Songs.
     @Published private(set) var refusedEdit: RefusedEdit?
+    /// Each Action's last send, and each Destination's.
+    @Published private(set) var sendResults: [ActionID: SendResult] = [:]
+    @Published private(set) var destinationSends: [DestinationID: SendResult] = [:]
+    /// Songs that fired since the last Stop or disarm.
+    @Published private(set) var firedThisRun: Set<SongID> = []
+    @Published private(set) var lastFiring: Firing?
+    /// The last timecode each source sent, for the Timecode screen's readouts.
+    @Published private(set) var sourceReadings: [SourceRole: Timecode] = [:]
+    /// LTC input peak level, 0...1.
+    @Published private(set) var ltcLevel: Float = 0
+    /// The Set being opened, while the opening screen shows.
+    @Published var openingSetName: String?
+    @Published var showingWelcome = false
+    @Published var showingNewSetSetup = false
 
     // Set file (see SetDocument.swift).
     /// Where the Set is saved; nil when it couldn't be opened and isn't saved anywhere yet.
@@ -142,6 +178,7 @@ final class ShowModel: ObservableObject {
         }
         midiOutputs = midiOutput.outputs()
         dmxStreamer.onError = { [weak self] message in self?.record(message, isError: true) }
+        ltcInput.onLevel = { [weak self] level in self?.ltcLevel = level }
         dmxStreamer.update(for: set)
         artNetInput.onPacket = { [weak self] packet, time in self?.receiveArtNet(packet, at: time) }
         if let status = midiInput.startError { record("MIDI is unavailable (error \(status))", isError: true) }
@@ -165,6 +202,7 @@ final class ShowModel: ObservableObject {
         if !armed {
             simulatorAllowedWhileArmed = false
             midiOutput.releaseAllNotes()
+            firedThisRun = []
         }
     }
 
@@ -221,7 +259,11 @@ final class ShowModel: ObservableObject {
     }
 
     func record(_ text: String, isError: Bool = false) {
-        record(text, timecode: nil, isError: isError)
+        record(text, timecode: nil, kind: isError ? .problem : .info)
+    }
+
+    func record(_ text: String, kind: LogEntry.Kind) {
+        record(text, timecode: nil, kind: kind)
     }
 
     // MARK: Songs
@@ -408,9 +450,12 @@ final class ShowModel: ObservableObject {
         }
     }
 
+    /// Changes a Destination, or adds it if the Set doesn't have it yet.
     func update(_ destination: Destination) {
         edit { set in
-            guard let index = set.destinations.firstIndex(where: { $0.id == destination.id }) else { return }
+            guard let index = set.destinations.firstIndex(where: { $0.id == destination.id }) else {
+                return set.destinations.append(destination)
+            }
             set.destinations[index] = destination
         }
     }
@@ -688,6 +733,7 @@ final class ShowModel: ObservableObject {
     }
 
     private func feed(_ reading: TimecodeReading, from role: SourceRole) {
+        sourceReadings[role] = reading.timecode
         apply(engine.handle(reading, from: role))
     }
 
@@ -709,11 +755,14 @@ final class ShowModel: ObservableObject {
             currentSongID = id
         case .fired(let id, let cause):
             let name = song(id)?.name ?? "?"
+            firedThisRun.insert(id)
+            lastFiring = Firing(songID: id, date: Date(), actionIDs: song(id)?.startActions.map(\.id) ?? [],
+                                sent: isArmed || cause == .manual)
             switch cause {
-            case .manual: record("Fired \(name) by hand")
+            case .manual: record("Fired \(name) by hand", kind: .fired)
             case .entering, .note:
                 let how = cause == .note ? " by its Start Note" : ""
-                record(isArmed ? "Fired \(name)\(how)" : "Fired \(name)\(how) (disarmed, nothing sent)")
+                record(isArmed ? "Fired \(name)\(how)" : "Fired \(name)\(how) (disarmed, nothing sent)", kind: .fired)
             }
         case .ended(let id, let cause):
             let name = song(id)?.name ?? "?"
@@ -725,29 +774,31 @@ final class ShowModel: ObservableObject {
             case .manual: how = "Fire stop by hand"
             }
             let sends = cause != .manual && !isArmed && !(song(id)?.stopActions.isEmpty ?? true) ? ", disarmed, nothing sent" : ""
-            record("\(name) ended (\(how)\(sends))")
+            record("\(name) ended (\(how)\(sends))", kind: .stop)
         case .stopped:
-            record("Timecode stopped")
+            firedThisRun = []
+            record("Timecode stopped", kind: .stop)
         case .dropout(let seconds):
-            record("Timecode dropout: \(Int((seconds * 1000).rounded())) ms gap", isError: true)
+            record("Timecode dropout: \(Int((seconds * 1000).rounded())) ms gap", kind: .dropout)
         case .send(let outgoing):
             send(outgoing)
         case .missingDestination(let songID, _):
             record("\(song(songID)?.name ?? "?"): Action skipped, its Destination was deleted", isError: true)
         case .armedChanged(let armed):
             isArmed = armed
-            record(armed ? "Armed" : "Disarmed")
+            record(armed ? "Armed" : "Disarmed", kind: armed ? .armed : .disarmed)
+            if armed { markCurrentVersionUsedInShow() }
         case .jumped:
             break
         case .sourceHealthChanged(let role, let healthy):
             if healthy { healthySources.insert(role) } else { healthySources.remove(role) }
         case .liveSourceChanged(let role):
             liveSource = role
-            record("Switched to the \(roleLabel(role)): \(sourceLabel(for: role))", isError: role == .backup)
+            record("Switched to the \(roleLabel(role)): \(sourceLabel(for: role))", kind: .failover)
         case .alertChanged(let newAlert):
             alert = newAlert
             if let newAlert {
-                record(Self.alertText(newAlert), isError: true)
+                record(alertText(newAlert), isError: true)
             } else if liveSource == .backup {
                 record("Primary Source is back; staying on the Backup until the next Stop")
             } else if !engine.isStopped {
@@ -772,14 +823,37 @@ final class ShowModel: ObservableObject {
             guard let status = destinationStatuses[destination.id], status.isOffline else { return nil }
             return "\(destination.name) \(Self.statusText(status))"
         }
-        return (alert.map { [Self.alertText($0)] } ?? []) + offline
+        return (alert.map { [alertText($0)] } ?? []) + offline
     }
 
     /// What the banner and the fire log say for an alert.
-    static func alertText(_ alert: TimecodeAlert) -> String {
+    func alertText(_ alert: TimecodeAlert) -> String {
         switch alert {
-        case .primaryLostRunningOnBackup: return "Primary lost / running on Backup"
-        case .allTimecodeLost: return "All timecode lost"
+        case .primaryLostRunningOnBackup:
+            return "Primary \(source.kindName) lost. Following Backup \(backupSource?.kindName ?? "Source")."
+        case .allTimecodeLost:
+            let kinds = [source, backupSource].compactMap { $0?.kindName }.joined(separator: " or ")
+            return "No timecode from \(kinds). Holding the last frame."
+        }
+    }
+
+    /// Writes the fire log to a CSV file the operator chooses.
+    func exportLog() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "\(set.name) Fire Log.csv"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let quote = { (text: String) in "\"" + text.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        let lines = ["time,timecode,event,detail"] + log.reversed().map { entry in
+            [formatter.string(from: entry.date), entry.timecode?.description ?? "", entry.kind.rawValue, quote(entry.text)]
+                .joined(separator: ",")
+        }
+        do {
+            try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            record("Couldn't export the Fire Log: \(error.localizedDescription)", isError: true)
         }
     }
 
@@ -792,7 +866,7 @@ final class ShowModel: ObservableObject {
         case .ending, .manualStop: kind = " (Stop Action)"
         }
         let summary = "\(songName)\(kind) → \(destination.name): \(Self.describe(outgoing.action.message))"
-        deliver(outgoing.action.message, to: destination, summary: summary)
+        deliver(outgoing.action.message, actionID: outgoing.action.id, to: destination, summary: summary)
     }
 
     /// Sends one Action now, Armed or not, and logs it as a test.
@@ -802,54 +876,97 @@ final class ShowModel: ObservableObject {
             record("Test: \(songName): Action not sent, its Destination was deleted", isError: true)
             return
         }
-        deliver(action.message, to: destination,
+        deliver(action.message, actionID: action.id, to: destination,
                 summary: "Test: \(songName) → \(destination.name): \(Self.describe(action.message))")
     }
 
-    private func deliver(_ message: Action.Message, to destination: Destination, summary: String) {
+    private func deliver(_ message: Action.Message, actionID: ActionID?, to destination: Destination, summary: String) {
         let timecode = playhead
+        let finish = { [weak self] (error: String?) in
+            guard let self else { return }
+            let result = SendResult(date: Date(), timecode: timecode, ok: error == nil, errorText: error)
+            if let actionID { self.sendResults[actionID] = result }
+            self.destinationSends[destination.id] = result
+            if let error {
+                self.record("\(summary) failed: \(error)", timecode: timecode, kind: .failed)
+            } else {
+                self.record(summary, timecode: timecode, kind: .sent)
+            }
+        }
         switch message {
         case .osc(let message):
-            guard message.hasValidAddress else {
-                record("\(summary) not sent: invalid OSC address", isError: true)
-                return
-            }
-            sender.send(message.encoded(), to: destination) { [weak self] error in
-                if let error {
-                    self?.record("\(summary) failed: \(error.localizedDescription)", timecode: timecode, isError: true)
-                } else {
-                    self?.record(summary, timecode: timecode)
-                }
-            }
+            guard message.hasValidAddress else { return finish("invalid OSC address") }
+            sender.send(message.encoded(), to: destination) { error in finish(error?.localizedDescription) }
         case .midiNote(let note):
-            sendMIDI(summary, to: destination) { try midiOutput.play(note, on: $0) }
+            sendMIDI(to: destination, finish) { try midiOutput.play(note, on: $0) }
         case .msc(let command):
             guard command.isValid else {
-                record("\(summary) not sent: cue and list must be numbers like 5 or 12.5, and a list needs a cue", isError: true)
-                return
+                return finish("cue and list must be numbers like 5 or 12.5, and a list needs a cue")
             }
-            sendMIDI(summary, to: destination) { try midiOutput.send(command.encoded, to: $0) }
+            sendMIDI(to: destination, finish) { try midiOutput.send(command.encoded, to: $0) }
         case .dmxPulse(let pulse):
             do {
                 try dmxStreamer.play(pulse, to: destination)
-                record(summary)
+                finish(nil)
             } catch {
-                record("\(summary) not sent: \(error.localizedDescription)", isError: true)
+                finish(error.localizedDescription)
             }
         }
     }
 
-    private func sendMIDI(_ summary: String, to destination: Destination, _ send: (MIDIPortReference) throws -> Void) {
+    private func sendMIDI(to destination: Destination, _ finish: (String?) -> Void, _ send: (MIDIPortReference) throws -> Void) {
         guard let output = destination.midiOutput else {
-            record("\(summary) not sent: \(destination.name) has no MIDI output (Destinations tab)", isError: true)
-            return
+            return finish("\(destination.name) has no MIDI output")
         }
         do {
             try send(output)
-            record(summary)
+            finish(nil)
         } catch {
-            record("\(summary) failed: \(error.localizedDescription)", isError: true)
+            finish(error.localizedDescription)
         }
+    }
+
+    /// Sends a test OSC message to a Destination, for New Set setup.
+    func testDestination(_ destination: Destination) {
+        deliver(.osc(OSCMessage(address: "/trigit/test")), actionID: nil, to: destination,
+                summary: "Test: \(destination.name)")
+    }
+
+    /// Whether a Destination is Reachable, No reply or Idle: the ping monitor
+    /// says offline, or the last send to it failed, is No reply.
+    enum Reachability { case reachable, noReply, idle }
+
+    func reachability(of id: DestinationID) -> Reachability {
+        if destinationStatuses[id]?.isOffline == true || destinationSends[id]?.ok == false { return .noReply }
+        if destinationStatuses[id] == .online || destinationSends[id]?.ok == true { return .reachable }
+        return .idle
+    }
+
+    /// The Show screen's status bar line about the last firing, and whether any Action failed.
+    var lastFiringSummary: (text: String, failed: Bool)? {
+        guard let firing = lastFiring, let name = song(firing.songID)?.name else { return nil }
+        let total = firing.actionIDs.count
+        guard firing.sent else { return ("\(name) fired, disarmed, nothing sent", false) }
+        let failed = firing.actionIDs.filter { id in
+            guard let result = sendResults[id], result.date >= firing.date else { return false }
+            return !result.ok
+        }.count
+        if failed > 0 { return ("\(name): \(failed) of \(total) Actions failed", true) }
+        return ("\(name) fired \(total) of \(total) Action\(total == 1 ? "" : "s")", false)
+    }
+
+    /// Where the Playhead is in the Set, if it is known.
+    var progress: ShowProgress? {
+        guard let playhead else { return nil }
+        return ShowProgress(set: set, playhead: playhead, rate: frameRate ?? simulator.frameRate)
+    }
+
+    /// Jumps the Simulator five seconds before a Song and plays.
+    func rehearse(_ song: Song) {
+        let rate = simulator.frameRate
+        let index = max(0, song.start.frameIndex(at: rate) - 5 * rate.nominalFramesPerSecond)
+        jump(to: Timecode(frameIndex: index, rate: rate))
+        if !simulator.isPlaying { play() }
     }
 
     /// How an Action's message reads in the log and the editor.
@@ -866,8 +983,8 @@ final class ShowModel: ObservableObject {
         }
     }
 
-    private func record(_ text: String, timecode: Timecode??, isError: Bool = false) {
-        let entry = LogEntry(timecode: timecode ?? playhead, text: text, isError: isError)
+    private func record(_ text: String, timecode: Timecode??, kind: LogEntry.Kind) {
+        let entry = LogEntry(timecode: timecode ?? playhead, text: text, kind: kind)
         log.insert(entry, at: 0)
         if log.count > Self.maxLogEntries { log.removeLast() }
         writeToShowLog(entry)
@@ -879,7 +996,7 @@ final class ShowModel: ObservableObject {
             showLogFile = file
             showLog.removeOldFiles(now: entry.date)
         }
-        let line = [entry.timecode?.description ?? "--:--:--:--", entry.isError ? "!" : " ", entry.text].joined(separator: "  ")
+        let line = [entry.timecode?.description ?? "--:--:--:--", entry.isError ? "!" : " ", entry.kind.rawValue, entry.text].joined(separator: "  ")
         try? showLog.append(line, at: entry.date)
     }
 

@@ -4,87 +4,66 @@ import TrigITEngine
 import TrigITProtocols
 import UniformTypeIdentifiers
 
-/// The Song list, with the selected Song's Start Actions below it.
+/// The Song list on the left, the selected Song's Timing or Actions on the right.
 struct SetEditorView: View {
     @EnvironmentObject private var model: ShowModel
     @State private var selection: SongID?
     @State private var importReport: ImportSummary?
 
     var body: some View {
-        VSplitView {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(model.set.name).font(.headline)
-                    if model.isShowLocked {
-                        Label("Locked", systemImage: "lock.fill").foregroundColor(.orange)
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                List(selection: $selection) {
+                    ForEach(model.set.songs) { song in
+                        SongListRow(song: song).tag(song.id)
+                            .contextMenu {
+                                Button("Delete Song") { delete(song.id) }.disabled(model.isShowLocked)
+                            }
                     }
-                    Spacer()
+                }
+                .listStyle(.inset)
+                .onDeleteCommand { if let selection { delete(selection) } }
+                RowDivider()
+                HStack {
+                    Button { model.addSong(); selection = model.set.songs.last?.id } label: {
+                        Label("Song", systemImage: "plus")
+                    }
                     Button("Import CSV…") { importCSV() }
-                    Button("Add Song") { model.addSong() }
-                    Button("Delete") {
-                        if let selection { model.deleteSong(selection) }
-                        selection = nil
+                    Spacer()
+                    Button { if let selection { delete(selection) } } label: {
+                        Label("Delete Song", systemImage: "minus").labelStyle(.iconOnly)
                     }
                     .disabled(selection == nil)
+                    .help("Delete the selected Song")
                 }
+                .capsuleButton()
                 .disabled(model.isShowLocked)
-
-                HStack {
-                    Text("Capture from the Playhead:").foregroundColor(.secondary)
-                    Button("Set start") { if let selection { model.captureStart(for: selection) } }
-                    Button("Set end") { if let selection { model.captureEnd(for: selection) } }
-                    Spacer()
-                }
-                .font(.callout)
-                .disabled(model.isShowLocked || selection == nil || model.playhead == nil)
-
-                HStack {
-                    Text("Stop time:").foregroundColor(.secondary)
-                    Stepper(value: Binding(get: { model.set.stopTime }, set: { model.setStopTime($0) }),
-                            in: ShowSet.stopTimeRange, step: 0.5) {
-                        Text(String(format: "%.1f s", model.set.stopTime))
-                            .font(.system(.body, design: .monospaced))
-                    }
-                    .help("Timecode silent for longer than this counts as a Stop: the current Song ends and re-arms. Shorter gaps are dropouts and never re-fire.")
-                    Spacer()
-                }
-                .font(.callout)
-                .disabled(model.isShowLocked)
-
-                if let refused = model.refusedEdit {
-                    Text(refused.message)
-                        .font(.callout)
-                        .foregroundColor(.orange)
-                }
-                List(selection: $selection) {
-                    Section {
-                        ForEach(model.set.songs) { song in
-                            SongRow(song: song, isCurrent: song.id == model.currentSongID)
-                                .tag(song.id)
-                        }
-                    } header: {
-                        SongHeader()
-                    }
-                }
+                .padding(12)
             }
-            .padding(8)
-            .frame(minHeight: 180)
+            .frame(width: 340)
+            .overlay(alignment: .trailing) { Rectangle().fill(Surface.hairline).frame(width: 1) }
 
             Group {
                 if let selection, let song = model.song(selection) {
-                    ActionsEditor(song: song)
+                    SongDetail(song: song).id(song.id)
                 } else {
-                    Text("Select a Song to edit its Actions")
+                    Text("Select a Song")
+                        .font(TrigType.body)
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .padding(8)
-            .frame(minHeight: 160)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .onAppear { if selection == nil { selection = model.set.songs.first?.id } }
         .sheet(item: $importReport) { summary in
             ImportReportView(summary: summary)
         }
+    }
+
+    private func delete(_ id: SongID) {
+        model.deleteSong(id)
+        if selection == id { selection = nil }
     }
 
     private func importCSV() {
@@ -99,6 +78,413 @@ struct SetEditorView: View {
         }
         let report = model.importSongs(csv: text, fileName: url.lastPathComponent)
         importReport = ImportSummary(fileName: url.lastPathComponent, report: report)
+    }
+}
+
+/// A Song in the list: name, span or notes, and a warning if it overlaps.
+struct SongListRow: View {
+    @EnvironmentObject private var model: ShowModel
+    let song: Song
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(song.name).font(TrigType.rowTitle).lineLimit(1)
+                Text(subtitle).font(TrigType.secondary.monospacedDigit()).foregroundColor(.secondary).lineLimit(1)
+            }
+            Spacer()
+            if let problem {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(StateColor.caution)
+                    .help(problem)
+                    .accessibilityLabel(problem)
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 4)
+    }
+
+    private var subtitle: String {
+        if song.hasSpan { return "\(song.start) to \(song.end)" }
+        if let note = song.startNote { return "Start Note, \(note.spoken)" }
+        if let note = song.stopNote { return "Stop Note, \(note.spoken)" }
+        return "No trigger"
+    }
+
+    private var problem: String? {
+        if song.hasSpan && song.end < song.start { return "End is before start: this Song never fires" }
+        guard let refused = model.refusedEdit, refused.songID == song.id || refused.conflicts.contains(song.id) else { return nil }
+        return refused.message
+    }
+}
+
+extension NoteTrigger {
+    /// "channel 1, C3"
+    var spoken: String {
+        "channel \(channel + 1), \(MIDINote(channel: channel, note: note).noteName)"
+    }
+}
+
+/// The selected Song: name, Fire and Stop, then its Timing or Actions.
+struct SongDetail: View {
+    @EnvironmentObject private var model: ShowModel
+    let song: Song
+    @SceneStorage("songTab") private var tab = "timing"
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(spacing: 12) {
+                    TextField("Song name", text: Binding(get: { song.name }, set: { name in
+                        var edited = song
+                        edited.name = name
+                        model.update(edited)
+                    }))
+                    .textFieldStyle(.plain)
+                    .font(TrigType.pageTitle)
+                    .disabled(model.isShowLocked)
+                    // Manual firing works under Show Lock and while disarmed.
+                    Button { model.fire(song.id) } label: { Label("Fire", systemImage: "play.fill") }
+                        .capsuleButton()
+                        .help("Fire: send this Song's Start Actions now, even if disarmed")
+                    Button { model.fireStop(song.id) } label: { Label("Stop", systemImage: "stop.fill") }
+                        .capsuleButton()
+                        .disabled(song.stopActions.isEmpty)
+                        .help("Stop: send this Song's Stop Actions now, even if disarmed")
+                }
+                Picker("View", selection: $tab) {
+                    Text("Timing").tag("timing")
+                    Text("Actions").tag("actions")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                if tab == "timing" {
+                    SongTimingEditor(song: song)
+                } else {
+                    SongActionsEditor(song: song)
+                }
+            }
+            .padding(EdgeInsets(top: 16, leading: 32, bottom: 28, trailing: 32))
+        }
+    }
+}
+
+// MARK: - Timing
+
+struct SongTimingEditor: View {
+    @EnvironmentObject private var model: ShowModel
+    let song: Song
+    @State private var learningNote: NoteField?
+
+    enum NoteField: String, Identifiable {
+        case start = "Start Note", stop = "Stop Note"
+        var id: Self { self }
+        var keyPath: WritableKeyPath<Song, NoteTrigger?> { self == .start ? \.startNote : \.stopNote }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                GroupHeader(title: "Timecode span") {
+                    Toggle("Use a timecode span", isOn: Binding(get: { song.hasSpan }, set: { hasSpan in
+                        var edited = song
+                        edited.hasSpan = hasSpan
+                        model.update(edited)
+                    }))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .help("Off: only the notes trigger this Song; its start and end are kept but ignored")
+                }
+                GroupedBox {
+                    spanRow("Start", value: song.start, keyPath: \.start, capture: { model.captureStart(for: song.id) })
+                    RowDivider()
+                    spanRow("End", value: song.end, keyPath: \.end, capture: { model.captureEnd(for: song.id) })
+                }
+                .disabled(!song.hasSpan)
+                .opacity(song.hasSpan ? 1 : 0.5)
+                if let refused = model.refusedEdit, refused.songID == song.id || refused.conflicts.contains(song.id) {
+                    Label(refused.message, systemImage: "exclamationmark.triangle.fill")
+                        .font(TrigType.secondary)
+                        .foregroundColor(StateColor.caution)
+                        .padding(.horizontal, 4)
+                } else {
+                    Footnote("Capture takes the live timecode\(model.playhead.map { ", now \($0)" } ?? "").")
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                GroupHeader("MIDI triggers")
+                GroupedBox {
+                    noteRow(.start, help: "Its Note On makes the Song Enter: sends its Start Actions and makes it current, even with no timecode")
+                    RowDivider()
+                    noteRow(.stop, help: "Its Note On Ends the Song if it is current. With no span and no Start Note, it sends the Stop Actions every time")
+                }
+                Footnote("Channel 1 to 16 and note 0 to 127. Leave both empty for none.")
+            }
+        }
+        .disabled(model.isShowLocked)
+        .sheet(item: $learningNote) { field in
+            LearnSheet(title: "Learn the \(field.rawValue)",
+                       hint: "Send a Note On from any of these MIDI inputs. Its channel and note become the \(field.rawValue).",
+                       listensForOSC: false) { midi, _ in
+                guard let trigger = midi.flatMap(Learn.noteTrigger(from:)), var edited = model.song(song.id) else { return false }
+                edited[keyPath: field.keyPath] = trigger
+                model.update(edited)
+                return true
+            }
+            .environmentObject(model)
+        }
+    }
+
+    private func spanRow(_ label: String, value: Timecode, keyPath: WritableKeyPath<Song, Timecode>,
+                         capture: @escaping () -> Void) -> some View {
+        FormRow(label: label) {
+            TimecodeField(label, value: value) { timecode in
+                var edited = song
+                edited[keyPath: keyPath] = timecode
+                return model.update(edited)
+            }
+            Button("Capture", action: capture)
+                .capsuleButton()
+                .disabled(model.playhead == nil)
+                .help("Set the \(label.lowercased()) to the live Playhead")
+        }
+        .frame(minHeight: 60)
+    }
+
+    private func noteRow(_ field: NoteField, help: String) -> some View {
+        FormRow(label: field.rawValue) {
+            NoteTriggerField(label: field.rawValue, value: song[keyPath: field.keyPath]) { note in
+                var edited = song
+                edited[keyPath: field.keyPath] = note
+                return model.update(edited)
+            }
+            .help(help)
+            Button("Learn") { learningNote = field }
+                .capsuleButton()
+                .help("Set the \(field.rawValue) from the next Note On")
+                .accessibilityLabel("Learn \(field.rawValue)")
+        }
+    }
+}
+
+// MARK: - Actions
+
+struct SongActionsEditor: View {
+    @EnvironmentObject private var model: ShowModel
+    let song: Song
+    @State private var presetList: ShowModel.ActionList?
+    @State private var learnList: ShowModel.ActionList?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
+                GroupHeader("When")
+                GroupedBox {
+                    if song.hasSpan {
+                        FormRow(label: "Timecode enters the span") {
+                            Text(song.start.description).font(.system(size: 20, weight: .semibold).monospacedDigit())
+                        }
+                    }
+                    if song.hasSpan && song.startNote != nil { RowDivider() }
+                    if let note = song.startNote {
+                        FormRow(label: "Start Note arrives") {
+                            Text(note.spoken.prefix(1).uppercased() + note.spoken.dropFirst()).foregroundColor(.secondary)
+                        }
+                    }
+                    if !song.hasSpan && song.startNote == nil {
+                        FormRow(label: "Only Fire or the Stop Note") { EmptyView() }
+                    }
+                }
+            }
+            actionGroup(.start, title: "Send", empty: "No Actions yet. Add one to send when this Song starts.")
+            VStack(alignment: .leading, spacing: 8) {
+                GroupHeader("When it ends")
+                GroupedBox {
+                    FormRow(label: song.hasSpan ? "Timecode passes \(song.end) or stops" : "The Stop Note arrives") {
+                        if song.stopActions.isEmpty {
+                            Text("No Stop Actions").foregroundColor(.secondary)
+                        }
+                        addMenu(.stop, label: "Add")
+                    }
+                    ForEach(song.stopActions) { action in
+                        RowDivider()
+                        ActionRow(songID: song.id, list: .stop, action: action)
+                    }
+                }
+                Footnote("Usually empty; for DJ pull-ups that must tell other gear the set has stopped.")
+            }
+            if model.set.destinations.isEmpty {
+                Footnote("Add a Destination first, in Destinations.")
+            }
+        }
+        .sheet(item: $presetList) { list in
+            PresetSheet { model.addAction($0, to: song.id, list: list) }
+        }
+        .sheet(item: $learnList) { list in
+            LearnSheet(title: "Learn an Action",
+                       hint: "Send a Note On, an MSC GO, STOP or RESUME, or an OSC message to this Mac. The first one becomes a new Action; then pick its Destination.",
+                       listensForOSC: true) { midi, packet in
+                guard let message = midi.flatMap(Learn.actionMessage(from:)) ?? packet.flatMap(Learn.actionMessage(fromOSC:))
+                else { return false }
+                model.addAction(message, to: song.id, list: list)
+                return true
+            }
+            .environmentObject(model)
+        }
+    }
+
+    private func actionGroup(_ list: ShowModel.ActionList, title: String, empty: String) -> some View {
+        let actions = song[keyPath: list.keyPath]
+        return VStack(alignment: .leading, spacing: 8) {
+            GroupHeader(title: title) { addMenu(list, label: "Add Action") }
+            if actions.isEmpty {
+                GroupedBox { FormRow(label: empty) { EmptyView() }.foregroundColor(.secondary) }
+            } else {
+                GroupedBox {
+                    ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+                        if index > 0 { RowDivider() }
+                        ActionRow(songID: song.id, list: list, action: action)
+                    }
+                }
+                Footnote("Sent in this order. Drag the handle to reorder. Arguments: 1 is an int, 0.5 a float, text a string; \"quote\" strings with spaces.")
+            }
+        }
+    }
+
+    private func addMenu(_ list: ShowModel.ActionList, label: String) -> some View {
+        Menu {
+            ForEach(ShowModel.NewActionKind.allCases, id: \.self) { kind in
+                Button(kind.label) { model.addAction(kind, to: song.id, list: list) }
+            }
+            Divider()
+            Button("From Resolume or grandMA3 Preset…") { presetList = list }
+            Button("Learn from MIDI or OSC…") { learnList = list }
+        } label: {
+            Label(label, systemImage: "plus")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .font(TrigType.body)
+        .disabled(model.set.destinations.isEmpty || model.isShowLocked)
+    }
+}
+
+extension ShowModel.ActionList: Identifiable {
+    var id: Self { self }
+}
+
+/// One Action: its Destination and kind, its fields, its last send and Test.
+struct ActionRow: View {
+    @EnvironmentObject private var model: ShowModel
+    let songID: SongID
+    let list: ShowModel.ActionList
+    let action: Action
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "line.3.horizontal")
+                .foregroundColor(.secondary)
+                .help("Drag to reorder")
+                .accessibilityHidden(true)
+                .draggable(String(action.id.rawValue))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Picker("Destination", selection: Binding(
+                        get: { action.destinationID },
+                        set: { id in
+                            var edited = action
+                            edited.destinationID = id
+                            model.update(edited, in: songID)
+                        }
+                    )) {
+                        ForEach(model.set.destinations) { Text($0.name).tag($0.id) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .menuStyle(.borderlessButton)
+                    .font(TrigType.rowTitle)
+                    .fixedSize()
+                    Text(kind).font(TrigType.secondary).foregroundColor(.secondary)
+                    if let problem = transportProblem {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(StateColor.caution)
+                            .help(problem)
+                            .accessibilityLabel(problem)
+                    }
+                }
+                HStack(spacing: 6) {
+                    switch action.message {
+                    case .osc(let message): OSCActionFields(message: message) { update(.osc($0)) }
+                    case .midiNote(let note): MIDINoteFields(note: note) { update(.midiNote($0)) }
+                    case .msc(let command): MSCFields(command: command) { update(.msc($0)) }
+                    case .dmxPulse(let pulse): DMXPulseFields(pulse: pulse) { update(.dmxPulse($0)) }
+                    }
+                }
+                .font(TrigType.code)
+                .lineLimit(1)
+            }
+            .disabled(model.isShowLocked)
+            Spacer(minLength: 8)
+            if let result = model.sendResults[action.id] {
+                SendStatusBlock(result: result)
+            }
+            Button(model.sendResults[action.id]?.ok == false ? "Retry" : "Test") { model.test(action, in: songID) }
+                .capsuleButton()
+                .help("Send just this Action now, even if disarmed")
+            Button(role: .destructive) {
+                model.deleteAction(action.id, in: songID)
+            } label: {
+                Label("Delete Action", systemImage: "trash").labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .disabled(model.isShowLocked)
+            .help("Delete this Action")
+        }
+        .padding(.vertical, 10)
+        .frame(minHeight: 68)
+        .dropDestination(for: String.self) { items, _ in
+            let actions = model.song(songID)?[keyPath: list.keyPath] ?? []
+            guard !model.isShowLocked, let raw = items.first.flatMap(UInt64.init),
+                  let from = actions.firstIndex(where: { $0.id.rawValue == raw }),
+                  let to = actions.firstIndex(where: { $0.id == action.id }), from != to else { return false }
+            // The dropped Action takes this row's place.
+            model.moveActions(in: songID, list: list, from: [from], to: from < to ? to + 1 : to)
+            return true
+        }
+    }
+
+    private var kind: String {
+        switch action.message {
+        case .osc: return "OSC"
+        case .midiNote: return "MIDI Note"
+        case .msc: return "MIDI Show Control"
+        case .dmxPulse: return "\(model.set.destination(action.destinationID)?.dmxOutput?.name ?? "DMX") pulse"
+        }
+    }
+
+    /// Why this Action's Destination can't carry it, if it can't.
+    private var transportProblem: String? {
+        guard let destination = model.set.destination(action.destinationID) else { return nil }
+        switch action.message {
+        case .osc:
+            return nil
+        case .midiNote, .msc:
+            return destination.midiOutput == nil ? "This Destination has no MIDI output; set one in Destinations" : nil
+        case .dmxPulse(let pulse):
+            guard let output = destination.dmxOutput else {
+                return "This Destination has no Art-Net or sACN output; set one in Destinations"
+            }
+            return output.universeRange.contains(pulse.universe)
+                ? nil : "Universe \(pulse.universe) is outside \(output.name)'s range \(output.universeRange.lowerBound) to \(output.universeRange.upperBound)"
+        }
+    }
+
+    private func update(_ message: Action.Message) {
+        var edited = action
+        edited.message = message
+        model.update(edited, in: songID)
     }
 }
 
@@ -141,188 +527,8 @@ struct ImportReportView: View {
     }
 }
 
-/// Column titles laid out exactly like a `SongRow`'s first line, so they line up.
-struct SongHeader: View {
-    var body: some View {
-        HStack {
-            SongRow.currentMarker(false)
-            Text("Name").frame(maxWidth: .infinity, alignment: .leading)
-            Text("Start").frame(width: TimecodeField.width, alignment: .leading)
-            Text("End").frame(width: TimecodeField.width, alignment: .leading)
-            SongRow.fireButtons(fire: {}, fireStop: {}, canStop: true).hidden()
-        }
-        .font(.caption)
-        .foregroundColor(.secondary)
-    }
-}
-
-struct SongRow: View {
-    @EnvironmentObject private var model: ShowModel
-    let song: Song
-    let isCurrent: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Self.currentMarker(isCurrent)
-                Group {
-                TextField("Name", text: Binding(
-                    get: { song.name },
-                    set: { name in
-                        var edited = song
-                        edited.name = name
-                        model.update(edited)
-                    }
-                ))
-                Group {
-                TimecodeField("Start", value: song.start) { start in
-                    var edited = song
-                    edited.start = start
-                    return model.update(edited)
-                }
-                TimecodeField("End", value: song.end) { end in
-                    var edited = song
-                    edited.end = end
-                    return model.update(edited)
-                }
-                }
-                .disabled(!song.hasSpan)
-                .opacity(song.hasSpan ? 1 : 0.4)
-                }
-                .disabled(model.isShowLocked)
-
-                // Manual firing works under Show Lock and while disarmed.
-                Self.fireButtons(fire: { model.fire(song.id) },
-                                 fireStop: { model.fireStop(song.id) },
-                                 canStop: !song.stopActions.isEmpty)
-            }
-            HStack {
-                Text(actionSummary)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                if let notes = noteSummary {
-                    Text(notes)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                if song.hasSpan && song.end < song.start {
-                    Text("End is before start: this Song never fires")
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
-            }
-            .padding(.leading, 16)
-        }
-        .padding(.vertical, 2)
-        .fontWeight(isCurrent ? .bold : .regular)
-        .background(isInConflict ? Color.orange.opacity(0.25) : Color.clear)
-    }
-
-    static func currentMarker(_ isCurrent: Bool) -> some View {
-        Circle()
-            .fill(isCurrent ? Color.green : Color.clear)
-            .frame(width: 8, height: 8)
-            .accessibilityLabel("Current Song")
-            .accessibilityHidden(!isCurrent)
-    }
-
-    static func fireButtons(fire: @escaping () -> Void, fireStop: @escaping () -> Void, canStop: Bool) -> some View {
-        HStack {
-            Button(action: fire) {
-                Label("Fire", systemImage: "play.fill").labelStyle(.iconOnly)
-            }
-            .help("Fire: send this Song's Start Actions now, even if disarmed")
-            Button(action: fireStop) {
-                Label("Fire Stop", systemImage: "stop.fill").labelStyle(.iconOnly)
-            }
-            .disabled(!canStop)
-            .help("Fire stop: send this Song's Stop Actions now, even if disarmed")
-        }
-        .buttonStyle(.borderless)
-    }
-
-    private var noteSummary: String? {
-        let notes = [song.startNote.map { "Start Note \($0.description)" },
-                     song.stopNote.map { "Stop Note \($0.description)" }].compactMap { $0 }
-        let parts = (song.hasSpan ? [] : ["no timecode span"]) + notes
-        return parts.isEmpty ? nil : "· " + parts.joined(separator: ", ")
-    }
-
-    private var actionSummary: String {
-        let start = song.startActions.isEmpty ? "No Start Actions" : "\(song.startActions.count) Start Action(s)"
-        return song.stopActions.isEmpty ? start : start + ", \(song.stopActions.count) Stop Action(s)"
-    }
-
-    /// Part of the last refused edit: the Song being edited or one in its way.
-    private var isInConflict: Bool {
-        guard let refused = model.refusedEdit else { return false }
-        return refused.songID == song.id || refused.conflicts.contains(song.id)
-    }
-}
 
 // MARK: - Triggers
-
-/// What triggers the selected Song: its timecode span, Start Note and Stop
-/// Note, in any combination but at least one.
-struct SongTriggersEditor: View {
-    @EnvironmentObject private var model: ShowModel
-    let song: Song
-    @State private var learningNote: NoteField?
-
-    enum NoteField: String, Identifiable {
-        case start = "Start Note", stop = "Stop Note"
-        var id: Self { self }
-        var keyPath: WritableKeyPath<Song, NoteTrigger?> { self == .start ? \.startNote : \.stopNote }
-    }
-
-    var body: some View {
-        HStack(spacing: 16) {
-            Toggle("Timecode span", isOn: Binding(
-                get: { song.hasSpan },
-                set: { hasSpan in
-                    var edited = song
-                    edited.hasSpan = hasSpan
-                    model.update(edited)
-                }
-            ))
-            .help("Off: only the notes trigger this Song; its start and end are kept but ignored")
-            NoteTriggerField(label: "Start Note", value: song.startNote) { note in
-                var edited = song
-                edited.startNote = note
-                return model.update(edited)
-            }
-            .help("Its Note On makes the Song Enter: sends its Start Actions and makes it current, even with no timecode")
-            learnButton(.start)
-            NoteTriggerField(label: "Stop Note", value: song.stopNote) { note in
-                var edited = song
-                edited.stopNote = note
-                return model.update(edited)
-            }
-            .help("Its Note On Ends the Song if it is current. With no span and no Start Note, it sends the Stop Actions every time")
-            learnButton(.stop)
-            Spacer()
-        }
-        .font(.callout)
-        .sheet(item: $learningNote) { field in
-            LearnSheet(title: "Learn the \(field.rawValue)",
-                       hint: "Send a Note On from any of these MIDI inputs. Its channel and note become the \(field.rawValue).",
-                       listensForOSC: false) { midi, _ in
-                guard let trigger = midi.flatMap(Learn.noteTrigger(from:)), var edited = model.song(song.id) else { return false }
-                edited[keyPath: field.keyPath] = trigger
-                model.update(edited)
-                return true
-            }
-            .environmentObject(model)
-        }
-    }
-
-    private func learnButton(_ field: NoteField) -> some View {
-        Button("Learn") { learningNote = field }
-            .controlSize(.small)
-            .help("Set the \(field.rawValue) from the next Note On")
-            .accessibilityLabel("Learn \(field.rawValue)")
-    }
-}
 
 /// A MIDI channel (1...16) and note number (0...127), or none when both are empty.
 struct NoteTriggerField: View {
@@ -350,21 +556,22 @@ struct NoteTriggerField: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(label).foregroundColor(.secondary)
+            Text("Channel").foregroundColor(.secondary)
             TextField("Ch", text: binding(isChannel: true), prompt: Text("ch"))
-                .frame(width: 34)
-                .accessibilityLabel("\(label) MIDI channel, 1 to 16")
-            TextField("Note", text: binding(isChannel: false), prompt: Text("note"))
                 .frame(width: 44)
+                .accessibilityLabel("\(label) MIDI channel, 1 to 16")
+            Text("Note").foregroundColor(.secondary)
+            TextField("Note", text: binding(isChannel: false), prompt: Text("note"))
+                .frame(width: 54)
                 .accessibilityLabel("\(label) note number, 0 to 127")
-            Text(value.map { MIDINote(channel: $0.channel, note: $0.note).noteName } ?? "")
-                .font(.caption.monospaced())
+            Text(value.map { MIDINote(channel: $0.channel, note: $0.note).noteName } ?? "None")
                 .foregroundColor(.secondary)
-                .frame(width: 30, alignment: .leading)
+                .frame(width: 48, alignment: .leading)
         }
         .labelsHidden()
-        .font(.system(.body, design: .monospaced))
-        .foregroundColor(parsed == nil || refused ? .red : .primary)
+        .textFieldStyle(.roundedBorder)
+        .font(TrigType.body.monospacedDigit())
+        .foregroundColor(parsed == nil || refused ? StateColor.alert : .primary)
         .onChange(of: value) { newValue in
             channel = newValue.map { String($0.channel + 1) } ?? ""
             note = newValue.map { String($0.note) } ?? ""
@@ -383,184 +590,7 @@ struct NoteTriggerField: View {
     }
 }
 
-// MARK: - Actions
-
-/// The selected Song's Start Actions and Stop Actions.
-struct ActionsEditor: View {
-    @EnvironmentObject private var model: ShowModel
-    let song: Song
-    @State private var list: ShowModel.ActionList = .start
-    @State private var showingPresets = false
-    @State private var learning = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(song.name).font(.headline)
-                Picker("Action list", selection: $list) {
-                    Text("Start Actions (\(song.startActions.count))").tag(ShowModel.ActionList.start)
-                    Text("Stop Actions (\(song.stopActions.count))").tag(ShowModel.ActionList.stop)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 320)
-                Spacer()
-                Menu("Add Action") {
-                    ForEach(ShowModel.NewActionKind.allCases, id: \.self) { kind in
-                        Button(kind.label) { model.addAction(kind, to: song.id, list: list) }
-                    }
-                    Divider()
-                    Button("From Resolume or grandMA3 preset…") { showingPresets = true }
-                    Button("Learn from MIDI or OSC…") { learning = true }
-                }
-                .fixedSize()
-                .disabled(model.set.destinations.isEmpty || model.isShowLocked)
-            }
-            SongTriggersEditor(song: song)
-                .disabled(model.isShowLocked)
-            if model.set.destinations.isEmpty {
-                Text("Add a Destination first (Destinations tab).")
-                    .foregroundColor(.secondary)
-            }
-            Text(list == .start
-                 ? "Sent in this order when the Song is entered."
-                 : "Sent in this order when the Song ends: timecode stops inside it, plays on past its end, or its Stop Note arrives. Usually empty; for DJ pull-ups.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Text("Drag to reorder. Arguments: 1 is an int, 0.5 a float, text a string; \"quote\" strings with spaces.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            // Not a List: on macOS a List row takes the click, so the text
-            // fields in an Action row never get keyboard focus. Rows reorder
-            // by dragging the handle instead of List's onMove.
-            ScrollView {
-                VStack(alignment: .leading) {
-                    let actions = song[keyPath: list.keyPath]
-                    ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
-                        HStack {
-                            Image(systemName: "line.3.horizontal")
-                                .foregroundColor(.secondary)
-                                .help("Drag to reorder")
-                                .accessibilityHidden(true)
-                                .draggable(String(action.id.rawValue))
-                            ActionRow(songID: song.id, action: action)
-                        }
-                        // A row wider than the pane is cut off on the right, as in a List.
-                        .lineLimit(1)
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                        .disabled(model.isShowLocked)
-                        .dropDestination(for: String.self) { items, _ in
-                            guard let raw = items.first.flatMap(UInt64.init),
-                                  let from = actions.firstIndex(where: { $0.id.rawValue == raw }),
-                                  from != index else { return false }
-                            // The dropped Action takes this row's place.
-                            model.moveActions(in: song.id, list: list, from: [from], to: from < index ? index + 1 : index)
-                            return true
-                        }
-                    }
-                }
-                .padding(.horizontal, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .sheet(isPresented: $showingPresets) {
-            PresetSheet { model.addAction($0, to: song.id, list: list) }
-        }
-        .sheet(isPresented: $learning) {
-            LearnSheet(title: "Learn an Action",
-                       hint: "Send a Note On, an MSC GO, STOP or RESUME, or an OSC message to this Mac. The first one becomes a new Action; then pick its Destination.",
-                       listensForOSC: true) { midi, packet in
-                guard let message = midi.flatMap(Learn.actionMessage(from:)) ?? packet.flatMap(Learn.actionMessage(fromOSC:))
-                else { return false }
-                model.addAction(message, to: song.id, list: list)
-                return true
-            }
-            .environmentObject(model)
-        }
-    }
-}
-
-struct ActionRow: View {
-    @EnvironmentObject private var model: ShowModel
-    let songID: SongID
-    let action: Action
-
-    var body: some View {
-        HStack {
-            Picker("Destination", selection: Binding(
-                get: { action.destinationID },
-                set: { id in
-                    var edited = action
-                    edited.destinationID = id
-                    model.update(edited, in: songID)
-                }
-            )) {
-                ForEach(model.set.destinations) { destination in
-                    Text(destination.name).tag(destination.id)
-                }
-            }
-            .labelsHidden()
-            .frame(minWidth: 90, idealWidth: 130, maxWidth: 130)
-
-            switch action.message {
-            case .osc(let message):
-                OSCActionFields(message: message) { update(.osc($0)) }
-            case .midiNote(let note):
-                MIDINoteFields(note: note) { update(.midiNote($0)) }
-            case .msc(let command):
-                MSCFields(command: command) { update(.msc($0)) }
-            case .dmxPulse(let pulse):
-                DMXPulseFields(pulse: pulse) { update(.dmxPulse($0)) }
-            }
-
-            if let problem = transportProblem {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                    .help(problem)
-                    .accessibilityLabel(problem)
-            }
-
-            Button {
-                model.test(action, in: songID)
-            } label: {
-                Label("Test Action", systemImage: "paperplane").labelStyle(.iconOnly)
-            }
-            .buttonStyle(.borderless)
-            .help("Test: send just this Action now, even if disarmed")
-
-            Button(role: .destructive) {
-                model.deleteAction(action.id, in: songID)
-            } label: {
-                Label("Delete Action", systemImage: "trash").labelStyle(.iconOnly)
-            }
-            .buttonStyle(.borderless)
-            .help("Delete this Action")
-        }
-    }
-
-    /// Why this Action's Destination can't carry it, if it can't.
-    private var transportProblem: String? {
-        guard let destination = model.set.destination(action.destinationID) else { return nil }
-        switch action.message {
-        case .osc:
-            return nil
-        case .midiNote, .msc:
-            return destination.midiOutput == nil ? "This Destination has no MIDI output; set one in the Destinations tab" : nil
-        case .dmxPulse(let pulse):
-            guard let output = destination.dmxOutput else {
-                return "This Destination has no Art-Net or sACN output; set one in the Destinations tab"
-            }
-            return output.universeRange.contains(pulse.universe)
-                ? nil : "Universe \(pulse.universe) is outside \(output.name)'s range \(output.universeRange.lowerBound)-\(output.universeRange.upperBound)"
-        }
-    }
-
-    private func update(_ message: Action.Message) {
-        var edited = action
-        edited.message = message
-        model.update(edited, in: songID)
-    }
-}
+// MARK: - Action fields
 
 /// Picks a Resolume or grandMA3 preset and its numbers; adds an ordinary, editable Action.
 struct PresetSheet: View {
