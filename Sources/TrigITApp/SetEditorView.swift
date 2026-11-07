@@ -251,6 +251,7 @@ struct ActionsEditor: View {
     @EnvironmentObject private var model: ShowModel
     let song: Song
     @State private var list: ShowModel.ActionList = .start
+    @State private var showingPresets = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -268,6 +269,8 @@ struct ActionsEditor: View {
                     ForEach(ShowModel.NewActionKind.allCases, id: \.self) { kind in
                         Button(kind.label) { model.addAction(kind, to: song.id, list: list) }
                     }
+                    Divider()
+                    Button("From Resolume or grandMA3 preset…") { showingPresets = true }
                 }
                 .fixedSize()
                 .disabled(model.set.destinations.isEmpty || model.isShowLocked)
@@ -294,6 +297,9 @@ struct ActionsEditor: View {
                     model.moveActions(in: song.id, list: list, from: offsets, to: destination)
                 })
             }
+        }
+        .sheet(isPresented: $showingPresets) {
+            PresetSheet { model.addAction($0, to: song.id, list: list) }
         }
     }
 }
@@ -338,6 +344,14 @@ struct ActionRow: View {
                     .accessibilityLabel(problem)
             }
 
+            Button {
+                model.test(action, in: songID)
+            } label: {
+                Label("Test Action", systemImage: "paperplane").labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .help("Test: send just this Action now, even if disarmed")
+
             Button(role: .destructive) {
                 model.deleteAction(action.id, in: songID)
             } label: {
@@ -369,6 +383,96 @@ struct ActionRow: View {
         var edited = action
         edited.message = message
         model.update(edited, in: songID)
+    }
+}
+
+/// Picks a Resolume or grandMA3 preset and its numbers; adds an ordinary, editable Action.
+struct PresetSheet: View {
+    enum Kind: String, CaseIterable, Identifiable {
+        case resolumeColumn = "Resolume: launch column"
+        case resolumeClip = "Resolume: launch clip"
+        case resolumeClearLayer = "Resolume: clear layer"
+        case resolumeClearAll = "Resolume: clear composition"
+        case resolumeNextColumn = "Resolume: next column"
+        case resolumePreviousColumn = "Resolume: previous column"
+        case resolumeResync = "Resolume: tempo resync"
+        case ma3Executor = "grandMA3: Go+ executor (OSC)"
+        case ma3Command = "grandMA3: command (OSC)"
+        case ma3Cue = "grandMA3: GO cue in list (MSC)"
+        var id: Self { self }
+    }
+
+    let onAdd: (ActionPreset) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var kind = Kind.resolumeColumn
+    @State private var first = 1
+    @State private var second = 1
+    @State private var text = ""
+
+    private var preset: ActionPreset {
+        switch kind {
+        case .resolumeColumn: return .resolumeLaunchColumn(column: first)
+        case .resolumeClip: return .resolumeLaunchClip(layer: first, column: second)
+        case .resolumeClearLayer: return .resolumeClearLayer(layer: first)
+        case .resolumeClearAll: return .resolumeClearComposition
+        case .resolumeNextColumn: return .resolumeNextColumn
+        case .resolumePreviousColumn: return .resolumePreviousColumn
+        case .resolumeResync: return .resolumeTempoResync
+        case .ma3Executor: return .ma3GoExecutor(page: first, executor: second)
+        case .ma3Command: return .ma3Command(text)
+        case .ma3Cue: return .ma3GoCue(cue: text, list: first == 0 ? "" : String(first))
+        }
+    }
+
+    /// Labels of the number fields this preset needs.
+    private var numberLabels: [String] {
+        switch kind {
+        case .resolumeColumn: return ["Column"]
+        case .resolumeClip: return ["Layer", "Column"]
+        case .resolumeClearLayer: return ["Layer"]
+        case .ma3Executor: return ["Page", "Executor"]
+        case .ma3Cue: return ["Cue list (0 = selected executor)"]
+        case .resolumeClearAll, .resolumeNextColumn, .resolumePreviousColumn, .resolumeResync, .ma3Command: return []
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Add Action from preset").font(.headline)
+            Form {
+                Picker("Preset", selection: $kind) {
+                    ForEach(Kind.allCases) { Text($0.rawValue).tag($0) }
+                }
+                ForEach(Array(numberLabels.enumerated()), id: \.offset) { index, label in
+                    TextField(label, value: index == 0 ? $first : $second, format: .number)
+                }
+                if kind == .ma3Command {
+                    TextField("Command", text: $text, prompt: Text("Go+ Exec 1.201"))
+                }
+                if kind == .ma3Cue {
+                    TextField("Cue", text: $text, prompt: Text("5 or 12.5"))
+                }
+            }
+            Text("Sends \(ShowModel.describe(preset.message)). The Action stays editable after adding.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            if kind == .ma3Executor || kind == .ma3Command {
+                Text("On the console, turn on Receive Command for the OSC line. If it has a prefix, edit the address to start with it, like /gma3/cmd.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Add") {
+                    onAdd(preset)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding()
+        .frame(width: 440)
     }
 }
 
