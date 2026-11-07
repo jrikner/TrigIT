@@ -65,6 +65,8 @@ final class ShowModel: ObservableObject {
     /// The MIDI source Start and Stop Notes are heard on, if any. It may be the MTC source.
     @Published private(set) var noteSourceID: Int32?
     @Published private(set) var midiOutputs: [MIDIOutputInfo] = []
+    /// Each Destination's status; missing means unknown.
+    @Published private(set) var destinationStatuses: [DestinationID: DestinationStatus] = [:]
     /// Whether timecode is arriving from the live source right now.
     var isReceiving: Bool { healthySources.contains(liveSource) }
     /// While locked the Set is read-only; arming and the Simulator still work.
@@ -107,6 +109,7 @@ final class ShowModel: ObservableObject {
     private let noteInput = MIDIInput()
     private var noteParser = MIDIParser()
     private let artNetInput = ArtNetTimecodeInput()
+    private let destinationChecker = DestinationChecker()
     private var timer: Timer?
     private var lastFedTimecode: Timecode?
 
@@ -135,6 +138,7 @@ final class ShowModel: ObservableObject {
         if let status = midiInput.startError { record("MIDI is unavailable (error \(status))", isError: true) }
         openLastDocument()
         startClock()
+        startDestinationChecks()
     }
 
     var currentSong: Song? {
@@ -380,6 +384,32 @@ final class ShowModel: ObservableObject {
         edit { set in
             guard !set.isInUse(id) else { return }
             set.destinations.removeAll { $0.id == id }
+        }
+    }
+
+    private func startDestinationChecks() {
+        destinationChecker.start(inputs: { [weak self] in
+            guard let self else { return nil }
+            // Loopback is always present, so an empty list means "not known yet".
+            let interfaces = self.networkInterfaces.isEmpty ? nil : Set(self.networkInterfaces.map(\.name))
+            return .init(set: self.set, interfaces: interfaces, midiOutputs: Set(self.midiOutputs.map(\.uniqueID)))
+        }, onUpdate: { [weak self] statuses, changes in
+            guard let self else { return }
+            if statuses != self.destinationStatuses { self.destinationStatuses = statuses }
+            for change in changes where change.new.isOffline || change.old.isOffline {
+                self.record("\(change.name): \(Self.statusText(change.new))", isError: change.new.isOffline)
+            }
+        }, onListenerError: { [weak self] message in self?.record(message, isError: true) })
+    }
+
+    /// How a Destination's status reads on the show screen, the banner and the log.
+    static func statusText(_ status: DestinationStatus) -> String {
+        switch status {
+        case .unknown: return "unknown"
+        case .online: return "online"
+        case .offline(.notResponding): return "offline, not responding"
+        case .offline(.interfaceMissing(let name)): return "offline, network interface \(name) is gone"
+        case .offline(.midiOutputMissing(let name)): return "offline, MIDI output \(name) is gone"
         }
     }
 
@@ -670,6 +700,15 @@ final class ShowModel: ObservableObject {
     func sourceLabel(for role: SourceRole) -> String {
         guard let choice = role == .primary ? source : backupSource else { return "none" }
         return sourceLabel(choice)
+    }
+
+    /// The banner's lines: the timecode alert, then each offline Destination.
+    var alertLines: [String] {
+        let offline = set.destinations.compactMap { destination -> String? in
+            guard let status = destinationStatuses[destination.id], status.isOffline else { return nil }
+            return "\(destination.name) \(Self.statusText(status))"
+        }
+        return (alert.map { [Self.alertText($0)] } ?? []) + offline
     }
 
     /// What the banner and the fire log say for an alert.

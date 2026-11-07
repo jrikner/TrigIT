@@ -102,9 +102,13 @@ public struct Destination: Identifiable, Hashable, Sendable {
     /// How DMX pulse Actions reach this Destination, if any. Uses `host` and
     /// `networkInterface`, but not `port`: Art-Net and sACN have fixed ports.
     public var dmxOutput: DMXOutput?
+    /// The local UDP port the device sends OSC replies to, if it sends any
+    /// (Resolume's OSC output, the grandMA3). A reply marks it online.
+    public var replyPort: UInt16?
 
     public init(id: DestinationID = DestinationID(), name: String, host: String, port: UInt16,
-                networkInterface: String? = nil, midiOutput: MIDIPortReference? = nil, dmxOutput: DMXOutput? = nil) {
+                networkInterface: String? = nil, midiOutput: MIDIPortReference? = nil, dmxOutput: DMXOutput? = nil,
+                replyPort: UInt16? = nil) {
         self.id = id
         self.name = name
         self.host = host
@@ -112,6 +116,7 @@ public struct Destination: Identifiable, Hashable, Sendable {
         self.networkInterface = networkInterface
         self.midiOutput = midiOutput
         self.dmxOutput = dmxOutput
+        self.replyPort = replyPort
     }
 }
 

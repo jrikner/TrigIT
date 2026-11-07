@@ -6,7 +6,7 @@ import TrigITStorage
 
 /// A Set using every kind of Action and Destination setting.
 func fullSet() -> ShowSet {
-    let resolume = Destination(id: DestinationID(rawValue: 10), name: "Resolume", host: "10.0.0.20", port: 7000, networkInterface: "en1")
+    let resolume = Destination(id: DestinationID(rawValue: 10), name: "Resolume", host: "10.0.0.20", port: 7000, networkInterface: "en1", replyPort: 7001)
     let ma3 = Destination(id: DestinationID(rawValue: 11), name: "MA3", host: "2.255.255.255", port: 8000,
                           midiOutput: MIDIPortReference(uniqueID: -123_456, name: "MA3 MIDI"), dmxOutput: .artNet)
     let intro = Song(
@@ -57,6 +57,7 @@ final class SetFileTests: XCTestCase {
         XCTAssertEqual(set.songs.first?.startActions, [])
         XCTAssertEqual(set.songs.first?.stopActions, [])
         XCTAssertNil(set.destinations.first?.midiOutput)
+        XCTAssertNil(set.destinations.first?.replyPort)
     }
 
     func testClampsAnOutOfRangeStopTime() throws {
