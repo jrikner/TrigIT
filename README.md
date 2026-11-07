@@ -21,3 +21,7 @@ The Show Engine (`Sources/TrigITEngine`) and the protocol codecs (`Sources/TrigI
 ## LTC input
 
 Pick "LTC: device, channel" as the Timecode Source on the show screen. macOS asks for audio input (microphone) permission the first time; when run with `swift run`, the permission belongs to Terminal (or whichever app launched it).
+
+## MTC input
+
+Pick "MTC: source" as the Timecode Source. Every Core MIDI source is listed: physical ports, network MIDI sessions (set up in Audio MIDI Setup → MIDI Network Setup) and IAC buses (enable "Device is online" for the IAC Driver in Audio MIDI Setup to run on the same Mac as Ableton).

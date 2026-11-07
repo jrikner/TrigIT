@@ -109,8 +109,8 @@ struct SourceBadge: View {
                 badge("SIMULATOR", color: .orange)
                 Text(model.simulator.isPlaying ? "Playing" : "Stopped")
                     .foregroundColor(.secondary)
-            case .ltc:
-                badge("LTC", color: .green)
+            case .ltc, .mtc:
+                badge(sourceKind, color: .green)
                 if model.isReceiving {
                     Text("Receiving").foregroundColor(.secondary)
                 } else {
@@ -120,6 +120,11 @@ struct SourceBadge: View {
                 }
             }
         }
+    }
+
+    private var sourceKind: String {
+        if case .mtc = model.source { return "MTC" }
+        return "LTC"
     }
 
     private func badge(_ text: String, color: Color) -> some View {
@@ -147,14 +152,25 @@ struct SourcePicker: View {
                         .tag(TimecodeSourceChoice.ltc(deviceUID: device.uid, channel: channel))
                 }
             }
+            ForEach(model.midiSources) { source in
+                Text("MTC: \(source.name)")
+                    .tag(TimecodeSourceChoice.mtc(sourceID: source.uniqueID))
+            }
             // Keep a chosen device that is unplugged visible rather than silently switching.
-            if case .ltc(let uid, let channel) = model.source,
-               !model.audioInputDevices.contains(where: { $0.uid == uid }) {
-                Text("LTC: missing device, channel \(channel + 1)")
+            if isMissing {
+                Text(model.sourceLabel(model.source))
                     .tag(model.source)
             }
         }
         .frame(maxWidth: 420)
+    }
+
+    private var isMissing: Bool {
+        switch model.source {
+        case .simulator: return false
+        case .ltc(let uid, _): return !model.audioInputDevices.contains { $0.uid == uid }
+        case .mtc(let id): return !model.midiSources.contains { $0.uniqueID == id }
+        }
     }
 }
 
