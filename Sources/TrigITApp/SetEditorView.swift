@@ -56,19 +56,14 @@ struct SetEditorView: View {
                         .font(.callout)
                         .foregroundColor(.orange)
                 }
-                HStack {
-                    Text("Name").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Start").frame(width: 110, alignment: .leading)
-                    Text("End").frame(width: 110, alignment: .leading)
-                }
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 8)
-
                 List(selection: $selection) {
-                    ForEach(model.set.songs) { song in
-                        SongRow(song: song, isCurrent: song.id == model.currentSongID)
-                            .tag(song.id)
+                    Section {
+                        ForEach(model.set.songs) { song in
+                            SongRow(song: song, isCurrent: song.id == model.currentSongID)
+                                .tag(song.id)
+                        }
+                    } header: {
+                        SongHeader()
                     }
                 }
             }
@@ -146,6 +141,21 @@ struct ImportReportView: View {
     }
 }
 
+/// Column titles laid out exactly like a `SongRow`'s first line, so they line up.
+struct SongHeader: View {
+    var body: some View {
+        HStack {
+            SongRow.currentMarker(false)
+            Text("Name").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Start").frame(width: TimecodeField.width, alignment: .leading)
+            Text("End").frame(width: TimecodeField.width, alignment: .leading)
+            SongRow.fireButtons(fire: {}, fireStop: {}, canStop: true).hidden()
+        }
+        .font(.caption)
+        .foregroundColor(.secondary)
+    }
+}
+
 struct SongRow: View {
     @EnvironmentObject private var model: ShowModel
     let song: Song
@@ -154,9 +164,7 @@ struct SongRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Circle()
-                    .fill(isCurrent ? Color.green : Color.clear)
-                    .frame(width: 8, height: 8)
+                Self.currentMarker(isCurrent)
                 Group {
                 TextField("Name", text: Binding(
                     get: { song.name },
@@ -166,12 +174,12 @@ struct SongRow: View {
                         model.update(edited)
                     }
                 ))
-                TimecodeField(value: song.start) { start in
+                TimecodeField("Start", value: song.start) { start in
                     var edited = song
                     edited.start = start
                     return model.update(edited)
                 }
-                TimecodeField(value: song.end) { end in
+                TimecodeField("End", value: song.end) { end in
                     var edited = song
                     edited.end = end
                     return model.update(edited)
@@ -180,22 +188,9 @@ struct SongRow: View {
                 .disabled(model.isShowLocked)
 
                 // Manual firing works under Show Lock and while disarmed.
-                Button {
-                    model.fire(song.id)
-                } label: {
-                    Image(systemName: "play.fill")
-                }
-                .buttonStyle(.borderless)
-                .help("Fire: send this Song's Start Actions now, even if disarmed")
-                Button {
-                    model.fireStop(song.id)
-                } label: {
-                    Image(systemName: "stop.fill")
-                }
-                .buttonStyle(.borderless)
-                .disabled(song.stopActions.isEmpty)
-                .opacity(song.stopActions.isEmpty ? 0.2 : 1)
-                .help("Fire stop: send this Song's Stop Actions now, even if disarmed")
+                Self.fireButtons(fire: { model.fire(song.id) },
+                                 fireStop: { model.fireStop(song.id) },
+                                 canStop: !song.stopActions.isEmpty)
             }
             HStack {
                 Text(actionSummary)
@@ -212,6 +207,29 @@ struct SongRow: View {
         .padding(.vertical, 2)
         .fontWeight(isCurrent ? .bold : .regular)
         .background(isInConflict ? Color.orange.opacity(0.25) : Color.clear)
+    }
+
+    static func currentMarker(_ isCurrent: Bool) -> some View {
+        Circle()
+            .fill(isCurrent ? Color.green : Color.clear)
+            .frame(width: 8, height: 8)
+            .accessibilityLabel("Current Song")
+            .accessibilityHidden(!isCurrent)
+    }
+
+    static func fireButtons(fire: @escaping () -> Void, fireStop: @escaping () -> Void, canStop: Bool) -> some View {
+        HStack {
+            Button(action: fire) {
+                Label("Fire", systemImage: "play.fill").labelStyle(.iconOnly)
+            }
+            .help("Fire: send this Song's Start Actions now, even if disarmed")
+            Button(action: fireStop) {
+                Label("Fire Stop", systemImage: "stop.fill").labelStyle(.iconOnly)
+            }
+            .disabled(!canStop)
+            .help("Fire stop: send this Song's Stop Actions now, even if disarmed")
+        }
+        .buttonStyle(.borderless)
     }
 
     private var actionSummary: String {
@@ -238,7 +256,7 @@ struct ActionsEditor: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(song.name).font(.headline)
-                Picker("", selection: $list) {
+                Picker("Action list", selection: $list) {
                     Text("Start Actions (\(song.startActions.count))").tag(ShowModel.ActionList.start)
                     Text("Stop Actions (\(song.stopActions.count))").tag(ShowModel.ActionList.stop)
                 }
@@ -287,7 +305,7 @@ struct ActionRow: View {
 
     var body: some View {
         HStack {
-            Picker("", selection: Binding(
+            Picker("Destination", selection: Binding(
                 get: { action.destinationID },
                 set: { id in
                     var edited = action
@@ -300,7 +318,7 @@ struct ActionRow: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 130)
+            .frame(minWidth: 90, idealWidth: 130, maxWidth: 130)
 
             switch action.message {
             case .osc(let message):
@@ -317,12 +335,13 @@ struct ActionRow: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)
                     .help(problem)
+                    .accessibilityLabel(problem)
             }
 
             Button(role: .destructive) {
                 model.deleteAction(action.id, in: songID)
             } label: {
-                Image(systemName: "trash")
+                Label("Delete Action", systemImage: "trash").labelStyle(.iconOnly)
             }
             .buttonStyle(.borderless)
             .help("Delete this Action")
@@ -365,18 +384,20 @@ struct OSCActionFields: View {
     }
 
     var body: some View {
-        TextField("/osc/address", text: Binding(
+        TextField("OSC address", text: Binding(
             get: { message.address },
             set: { address in
                 var edited = message
                 edited.address = address
                 onChange(edited)
             }
-        ))
+        ), prompt: Text("/osc/address"))
+        .labelsHidden()
         .font(.system(.body, design: .monospaced))
         .foregroundColor(message.hasValidAddress ? .primary : .red)
+        .frame(minWidth: 80)
 
-        TextField("arguments", text: Binding(
+        TextField("OSC arguments", text: Binding(
             get: { argumentsText },
             set: { text in
                 argumentsText = text
@@ -386,10 +407,11 @@ struct OSCActionFields: View {
                     onChange(edited)
                 }
             }
-        ))
+        ), prompt: Text("arguments"))
+        .labelsHidden()
         .font(.system(.body, design: .monospaced))
         .foregroundColor(OSCArgument.parseList(argumentsText) == nil ? .red : .primary)
-        .frame(width: 140)
+        .frame(minWidth: 70, idealWidth: 140, maxWidth: 140)
     }
 }
 
@@ -399,16 +421,16 @@ struct MIDINoteFields: View {
 
     var body: some View {
         Text("Note").foregroundColor(.secondary)
-        NumberField(value: Int(note.note), range: 0...127, width: 44) {
+        NumberField("MIDI note", value: Int(note.note), range: 0...127, width: 44) {
             onChange(MIDINote(channel: note.channel, note: UInt8($0), velocity: note.velocity))
         }
         Text(note.noteName).font(.system(.body, design: .monospaced)).frame(width: 40, alignment: .leading)
         Text("Ch").foregroundColor(.secondary)
-        NumberField(value: Int(note.channel) + 1, range: 1...16, width: 36) {
+        NumberField("MIDI channel", value: Int(note.channel) + 1, range: 1...16, width: 36) {
             onChange(MIDINote(channel: UInt8($0 - 1), note: note.note, velocity: note.velocity))
         }
         Text("Vel").foregroundColor(.secondary)
-        NumberField(value: Int(note.velocity), range: 1...127, width: 44) {
+        NumberField("Velocity", value: Int(note.velocity), range: 1...127, width: 44) {
             onChange(MIDINote(channel: note.channel, note: note.note, velocity: UInt8($0)))
         }
         Spacer(minLength: 0)
@@ -420,7 +442,7 @@ struct MSCFields: View {
     let onChange: (MSCCommand) -> Void
 
     var body: some View {
-        Picker("", selection: Binding(
+        Picker("MSC command", selection: Binding(
             get: { command.command },
             set: { value in
                 var edited = command
@@ -433,27 +455,29 @@ struct MSCFields: View {
         .labelsHidden()
         .frame(width: 90)
         Text("Cue").foregroundColor(.secondary)
-        TextField("next", text: Binding(
+        TextField("MSC cue", text: Binding(
             get: { command.cue },
             set: { value in
                 var edited = command
                 edited.cue = value
                 onChange(edited)
             }
-        ))
+        ), prompt: Text("next"))
+        .labelsHidden()
         .frame(width: 56)
         Text("List").foregroundColor(.secondary)
-        TextField("default", text: Binding(
+        TextField("MSC list", text: Binding(
             get: { command.list },
             set: { value in
                 var edited = command
                 edited.list = value
                 onChange(edited)
             }
-        ))
+        ), prompt: Text("default"))
+        .labelsHidden()
         .frame(width: 56)
         Text("Device").foregroundColor(.secondary)
-        NumberField(value: Int(command.deviceID), range: 0...127, width: 40) { id in
+        NumberField("MSC device ID", value: Int(command.deviceID), range: 0...127, width: 40) { id in
             var edited = command
             edited.deviceID = UInt8(id)
             onChange(edited)
@@ -473,20 +497,20 @@ struct DMXPulseFields: View {
 
     var body: some View {
         Text("Univ").foregroundColor(.secondary)
-        NumberField(value: pulse.universe, range: 0...63_999, width: 52) { universe in
+        NumberField("Universe", value: pulse.universe, range: 0...63_999, width: 52) { universe in
             onChange(DMXPulse(universe: universe, channel: pulse.channel, value: pulse.value, duration: pulse.duration))
         }
         .help("Art-Net: port-address 0-32767. sACN: universe 1-63999.")
         Text("Ch").foregroundColor(.secondary)
-        NumberField(value: pulse.channel, range: 1...512, width: 40) { channel in
+        NumberField("DMX channel", value: pulse.channel, range: 1...512, width: 40) { channel in
             onChange(DMXPulse(universe: pulse.universe, channel: channel, value: pulse.value, duration: pulse.duration))
         }
         Text("=").foregroundColor(.secondary)
-        NumberField(value: Int(pulse.value), range: 0...255, width: 40) { value in
+        NumberField("DMX value", value: Int(pulse.value), range: 0...255, width: 40) { value in
             onChange(DMXPulse(universe: pulse.universe, channel: pulse.channel, value: UInt8(value), duration: pulse.duration))
         }
         Text("for").foregroundColor(.secondary)
-        NumberField(value: Int((pulse.duration * 1000).rounded()), range: 50...10_000, width: 52) { milliseconds in
+        NumberField("Duration in milliseconds", value: Int((pulse.duration * 1000).rounded()), range: 50...10_000, width: 52) { milliseconds in
             onChange(DMXPulse(universe: pulse.universe, channel: pulse.channel, value: pulse.value,
                               duration: Double(milliseconds) / 1000))
         }
@@ -497,13 +521,15 @@ struct DMXPulseFields: View {
 
 /// A small whole-number field. Values outside `range` turn red and are not applied.
 struct NumberField: View {
+    let label: String
     let value: Int
     let range: ClosedRange<Int>
     let width: CGFloat
     let onCommit: (Int) -> Void
     @State private var text: String
 
-    init(value: Int, range: ClosedRange<Int>, width: CGFloat, onCommit: @escaping (Int) -> Void) {
+    init(_ label: String, value: Int, range: ClosedRange<Int>, width: CGFloat, onCommit: @escaping (Int) -> Void) {
+        self.label = label
         self.value = value
         self.range = range
         self.width = width
@@ -514,13 +540,14 @@ struct NumberField: View {
     private var parsed: Int? { Int(text).flatMap { range.contains($0) ? $0 : nil } }
 
     var body: some View {
-        TextField("", text: Binding(
+        TextField(label, text: Binding(
             get: { text },
             set: { newText in
                 text = newText
                 if let parsed { onCommit(parsed) }
             }
         ))
+        .labelsHidden()
         .font(.system(.body, design: .monospaced))
         .foregroundColor(parsed == nil ? .red : .primary)
         .frame(width: width)

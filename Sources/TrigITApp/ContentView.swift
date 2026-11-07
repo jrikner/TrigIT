@@ -8,17 +8,16 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBarView(showFireLog: $showFireLog)
             if let problem = model.documentProblem {
-                Text(problem)
+                Label(problem, systemImage: "exclamationmark.triangle.fill")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 6)
-                    .background(Color.red.opacity(0.85))
+                    .background(Color.red)
                     .foregroundColor(.white)
                     .textSelection(.enabled)
+                Divider()
             }
-            Divider()
             HSplitView {
                 TabView {
                     SetEditorView()
@@ -27,21 +26,24 @@ struct ContentView: View {
                         .tabItem { Text("Destinations") }
                 }
                 .padding(8)
-                .frame(minWidth: 460, idealWidth: 520)
+                .frame(minWidth: 420, idealWidth: 520, maxWidth: .infinity)
+                .layoutPriority(1)
 
                 VStack(spacing: 0) {
                     ShowScreenView()
                     Divider()
                     SimulatorControlsView()
                 }
-                .frame(minWidth: 460)
+                .frame(minWidth: 400, idealWidth: 520, maxWidth: .infinity)
+                .layoutPriority(1)
 
                 if showFireLog {
                     FireLogView()
-                        .frame(minWidth: 260, idealWidth: 320)
+                        .frame(minWidth: 220, idealWidth: 300, maxWidth: 480)
                 }
             }
         }
+        .toolbar { ShowToolbar(showFireLog: $showFireLog) }
         .navigationTitle(model.windowTitle)
         .sheet(isPresented: $model.showingVersions) {
             PreviousVersionsView()
@@ -89,38 +91,69 @@ struct PreviousVersionsView: View {
     }
 }
 
-// MARK: - Top bar
+// MARK: - Toolbar
 
-struct TopBarView: View {
+/// Arm, Show Lock and the Fire log, in the window's native toolbar.
+struct ShowToolbar: ToolbarContent {
     @EnvironmentObject private var model: ShowModel
     @Binding var showFireLog: Bool
 
-    var body: some View {
-        HStack {
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
             Button {
                 model.setArmed(!model.isArmed)
             } label: {
-                Text(model.isArmed ? "ARMED" : "DISARMED")
-                    .font(.system(size: 18, weight: .heavy))
-                    .frame(width: 160, height: 34)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(model.isArmed ? Color.red : Color.gray.opacity(0.35)))
-                    .foregroundColor(.white)
+                // Icon plus word, so the state never depends on color alone.
+                Label(model.isArmed ? "Armed" : "Disarmed",
+                      systemImage: model.isArmed ? "bolt.fill" : "bolt.slash")
+                    .labelStyle(.titleAndIcon)
+                    .font(.headline)
+                    .frame(minWidth: 110)
             }
-            .buttonStyle(.plain)
-            .help(model.isArmed ? "Click to disarm: timecode is still followed, nothing is sent"
-                                : "Click to arm: Songs send their Actions when entered")
-            Toggle(isOn: Binding(get: { model.isShowLocked }, set: { model.setShowLocked($0) })) {
+            .buttonStyle(EngagedButtonStyle(isEngaged: model.isArmed, color: .red))
+            .keyboardShortcut("a", modifiers: [.command, .shift])
+            .help(model.isArmed ? "Disarm (⇧⌘A): timecode is still followed, nothing is sent"
+                                : "Arm (⇧⌘A): Songs send their Actions when entered")
+            .accessibilityValue(model.isArmed ? "Armed" : "Disarmed")
+
+            Button {
+                model.setShowLocked(!model.isShowLocked)
+            } label: {
                 Label("Show Lock", systemImage: model.isShowLocked ? "lock.fill" : "lock.open")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(EngagedButtonStyle(isEngaged: model.isShowLocked, color: .orange))
+            .accessibilityAddTraits(model.isShowLocked ? .isSelected : [])
+            .help("Make the Set read-only during the show. Arming and the Simulator still work.")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Toggle(isOn: $showFireLog) {
+                Label("Fire Log", systemImage: "sidebar.right")
             }
             .toggleStyle(.button)
-            .tint(.orange)
-            .help("Make the Set read-only during the show. Arming and the Simulator still work.")
-            Spacer()
-            Toggle("Fire log", isOn: $showFireLog)
-                .toggleStyle(.button)
+            .help(showFireLog ? "Hide the Fire log" : "Show the Fire log")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+    }
+}
+
+/// A toolbar button that fills with `color` while its state is on. Toolbar
+/// items ignore `.tint` and `.borderedProminent`, so this draws its own fill.
+struct EngagedButtonStyle: ButtonStyle {
+    let isEngaged: Bool
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            // Black, not white: white on system red/orange is under 4.5:1 contrast.
+            .foregroundColor(isEngaged ? .black : .primary)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isEngaged ? color : Color.primary.opacity(0.08))
+            )
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 
@@ -148,7 +181,9 @@ struct ShowScreenView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Current Song").font(.caption).foregroundColor(.secondary)
                 Text(model.currentSong?.name ?? "No Song")
-                    .font(.system(size: 32, weight: .semibold))
+                    .font(.largeTitle.weight(.semibold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
                     .foregroundColor(model.currentSong == nil ? .secondary : .primary)
             }
             Spacer(minLength: 0)
@@ -259,10 +294,11 @@ struct SimulatorControlsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Simulator").font(.headline)
             HStack {
-                TextField("hh:mm:ss:ff", text: $targetText)
+                TextField("Simulator timecode", text: $targetText, prompt: Text("hh:mm:ss:ff"))
+                    .labelsHidden()
                     .font(.system(.body, design: .monospaced))
                     .foregroundColor(target == nil ? .red : .primary)
-                    .frame(width: 120)
+                    .frame(minWidth: 100, idealWidth: 120, maxWidth: 120)
                 Button("Play from") { if let target { model.play(from: target) } }
                     .disabled(target == nil)
                 Button("Jump") { if let target { model.jump(to: target) } }
@@ -284,8 +320,8 @@ struct SimulatorControlsView: View {
             .pickerStyle(.segmented)
         }
         .padding(20)
+        // Disabled controls already dim themselves; extra opacity would dim them twice.
         .disabled(model.source != .simulator)
-        .opacity(model.source == .simulator ? 1 : 0.5)
     }
 }
 
@@ -324,19 +360,23 @@ struct FireLogView: View {
 /// type; text that isn't a timecode, or a value `onCommit` refuses, turns red.
 /// When the value changes elsewhere (capture, undo) the text follows.
 struct TimecodeField: View {
+    /// Shared with the Song list's column header so the two line up.
+    static let width: CGFloat = 110
+    let label: String
     let value: Timecode
     let onCommit: (Timecode) -> Bool
     @State private var text: String
     @State private var refused = false
 
-    init(value: Timecode, onCommit: @escaping (Timecode) -> Bool) {
+    init(_ label: String, value: Timecode, onCommit: @escaping (Timecode) -> Bool) {
+        self.label = label
         self.value = value
         self.onCommit = onCommit
         _text = State(initialValue: value.description)
     }
 
     var body: some View {
-        TextField("hh:mm:ss:ff", text: Binding(
+        TextField(label, text: Binding(
             get: { text },
             set: { newText in
                 text = newText
@@ -344,10 +384,11 @@ struct TimecodeField: View {
                     refused = !onCommit(timecode)
                 }
             }
-        ))
+        ), prompt: Text("hh:mm:ss:ff"))
+        .labelsHidden()
         .font(.system(.body, design: .monospaced))
         .foregroundColor(Timecode(text) == nil || refused ? .red : .primary)
-        .frame(width: 110)
+        .frame(width: TimecodeField.width)
         .onChange(of: value) { newValue in
             text = newValue.description
             refused = false

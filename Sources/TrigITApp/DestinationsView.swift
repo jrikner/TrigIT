@@ -14,109 +14,118 @@ struct DestinationsView: View {
                 Button("Add Destination") { model.addDestination() }
                     .disabled(model.isShowLocked)
             }
-            HStack {
-                Text("Name").frame(width: 120, alignment: .leading)
-                Text("Address").frame(maxWidth: .infinity, alignment: .leading)
-                Text("Port").frame(width: 64, alignment: .leading)
-                Text("Network interface").frame(width: 170, alignment: .leading)
-                Text("MIDI output").frame(width: 170, alignment: .leading)
-                Text("DMX").frame(width: 140, alignment: .leading)
-                Spacer().frame(width: 24)
-            }
-            .font(.caption)
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 8)
 
-            List {
-                ForEach(model.set.destinations) { destination in
-                    DestinationRow(destination: destination)
-                        .disabled(model.isShowLocked)
+            // A Table keeps headers aligned, lets columns be resized, and
+            // scrolls sideways instead of clipping when the pane is narrow.
+            Table(model.set.destinations) {
+                TableColumn("Name") { destination in
+                    TextField("Name", text: binding(destination, \.name))
+                        .labelsHidden()
                 }
+                .width(min: 80, ideal: 120)
+                TableColumn("Address") { destination in
+                    TextField("IP address", text: binding(destination, \.host))
+                        .labelsHidden()
+                        .font(.system(.body, design: .monospaced))
+                }
+                .width(min: 100, ideal: 140)
+                TableColumn("Port") { destination in
+                    PortField(destination: destination)
+                }
+                .width(min: 56, ideal: 64, max: 80)
+                TableColumn("Network Interface") { destination in
+                    InterfacePicker(destination: destination, selection: binding(destination, \.networkInterface))
+                }
+                .width(min: 110, ideal: 170)
+                TableColumn("MIDI Output") { destination in
+                    MIDIOutputPicker(destination: destination, selection: binding(destination, \.midiOutput))
+                }
+                .width(min: 100, ideal: 170)
+                TableColumn("DMX") { destination in
+                    Picker("DMX output", selection: binding(destination, \.dmxOutput)) {
+                        Text("None").tag(DMXOutput?.none)
+                        ForEach(DMXOutput.allCases, id: \.self) { output in
+                            Text(output.name).tag(DMXOutput?.some(output))
+                        }
+                    }
+                    .labelsHidden()
+                    .help("For pulse Actions. Art-Net goes to the address (a node, or a broadcast address such as 2.255.255.255); sACN multicast ignores it; sACN unicast uses it. Both use the chosen network interface.")
+                }
+                .width(min: 90, ideal: 140)
+                TableColumn("") { destination in
+                    let inUse = model.set.isInUse(destination.id)
+                    Button(role: .destructive) {
+                        model.deleteDestination(destination.id)
+                    } label: {
+                        Label("Delete Destination", systemImage: "trash").labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(inUse)
+                    .help(inUse ? "Used by an Action; remove those Actions first" : "Delete this Destination")
+                }
+                .width(24)
             }
+            .disabled(model.isShowLocked)
         }
         .padding(8)
     }
+
+    private func binding<Value>(_ destination: Destination, _ keyPath: WritableKeyPath<Destination, Value>) -> Binding<Value> {
+        Binding(
+            get: { destination[keyPath: keyPath] },
+            set: { value in
+                var edited = destination
+                edited[keyPath: keyPath] = value
+                model.update(edited)
+            }
+        )
+    }
 }
 
-struct DestinationRow: View {
+/// The port, kept as typed text so a half-typed or invalid value can show red
+/// without being applied.
+struct PortField: View {
     @EnvironmentObject private var model: ShowModel
     let destination: Destination
-    @State private var portText: String
+    @State private var text: String
 
     init(destination: Destination) {
         self.destination = destination
-        _portText = State(initialValue: String(destination.port))
+        _text = State(initialValue: String(destination.port))
     }
 
-    private var inUse: Bool { model.set.isInUse(destination.id) }
+    var body: some View {
+        TextField("Port", text: Binding(
+            get: { text },
+            set: { newText in
+                text = newText
+                if let port = UInt16(newText), port > 0 {
+                    var edited = destination
+                    edited.port = port
+                    model.update(edited)
+                }
+            }
+        ))
+        .labelsHidden()
+        .font(.system(.body, design: .monospaced))
+        .foregroundColor(UInt16(text).map { $0 > 0 } == true ? .primary : .red)
+        .onChange(of: destination.port) { text = String($0) }
+    }
+}
+
+struct InterfacePicker: View {
+    @EnvironmentObject private var model: ShowModel
+    let destination: Destination
+    let selection: Binding<String?>
 
     var body: some View {
-        HStack {
-            TextField("Name", text: binding(\.name))
-                .frame(width: 120)
-            TextField("IP address", text: binding(\.host))
-                .font(.system(.body, design: .monospaced))
-            TextField("Port", text: Binding(
-                get: { portText },
-                set: { text in
-                    portText = text
-                    if let port = UInt16(text), port > 0 {
-                        var edited = destination
-                        edited.port = port
-                        model.update(edited)
-                    }
-                }
-            ))
-            .font(.system(.body, design: .monospaced))
-            .foregroundColor(UInt16(portText).map { $0 > 0 } == true ? .primary : .red)
-            .frame(width: 64)
-
-            Picker("", selection: binding(\.networkInterface)) {
-                Text("Automatic (macOS decides)").tag(String?.none)
-                ForEach(interfaceChoices, id: \.self) { name in
-                    Text(label(for: name)).tag(String?.some(name))
-                }
+        Picker("Network interface", selection: selection) {
+            Text("Automatic (macOS decides)").tag(String?.none)
+            ForEach(interfaceChoices, id: \.self) { name in
+                Text(label(for: name)).tag(String?.some(name))
             }
-            .labelsHidden()
-            .frame(width: 170)
-
-            Picker("", selection: binding(\.midiOutput)) {
-                Text("None").tag(MIDIPortReference?.none)
-                ForEach(model.midiOutputs) { output in
-                    // Match by unique ID, so a renamed port still shows as chosen.
-                    let isChosen = destination.midiOutput?.uniqueID == output.uniqueID
-                    Text(output.name).tag(MIDIPortReference?.some(isChosen ? destination.midiOutput! : output.reference))
-                }
-                // Keep an unplugged output visible rather than silently clearing it.
-                if let chosen = destination.midiOutput,
-                   !model.midiOutputs.contains(where: { $0.uniqueID == chosen.uniqueID }) {
-                    Text("\(chosen.name) (not connected)").tag(MIDIPortReference?.some(chosen))
-                }
-            }
-            .labelsHidden()
-            .frame(width: 170)
-            .help("For MIDI note and MIDI Show Control Actions")
-
-            Picker("", selection: binding(\.dmxOutput)) {
-                Text("None").tag(DMXOutput?.none)
-                ForEach(DMXOutput.allCases, id: \.self) { output in
-                    Text(output.name).tag(DMXOutput?.some(output))
-                }
-            }
-            .labelsHidden()
-            .frame(width: 140)
-            .help("For pulse Actions. Art-Net goes to the address (a node, or a broadcast address such as 2.255.255.255); sACN multicast ignores it; sACN unicast uses it. Both use the chosen network interface.")
-
-            Button(role: .destructive) {
-                model.deleteDestination(destination.id)
-            } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .disabled(inUse)
-            .help(inUse ? "Used by an Action; remove those Actions first" : "Delete this Destination")
-            .frame(width: 24)
         }
+        .labelsHidden()
     }
 
     /// Available interfaces, plus the chosen one if it has disappeared so the
@@ -132,15 +141,28 @@ struct DestinationRow: View {
     private func label(for name: String) -> String {
         model.networkInterfaces.first { $0.name == name }?.label ?? "\(name) (not available)"
     }
+}
 
-    private func binding<Value>(_ keyPath: WritableKeyPath<Destination, Value>) -> Binding<Value> {
-        Binding(
-            get: { destination[keyPath: keyPath] },
-            set: { value in
-                var edited = destination
-                edited[keyPath: keyPath] = value
-                model.update(edited)
+struct MIDIOutputPicker: View {
+    @EnvironmentObject private var model: ShowModel
+    let destination: Destination
+    let selection: Binding<MIDIPortReference?>
+
+    var body: some View {
+        Picker("MIDI output", selection: selection) {
+            Text("None").tag(MIDIPortReference?.none)
+            ForEach(model.midiOutputs) { output in
+                // Match by unique ID, so a renamed port still shows as chosen.
+                let isChosen = destination.midiOutput?.uniqueID == output.uniqueID
+                Text(output.name).tag(MIDIPortReference?.some(isChosen ? destination.midiOutput! : output.reference))
             }
-        )
+            // Keep an unplugged output visible rather than silently clearing it.
+            if let chosen = destination.midiOutput,
+               !model.midiOutputs.contains(where: { $0.uniqueID == chosen.uniqueID }) {
+                Text("\(chosen.name) (not connected)").tag(MIDIPortReference?.some(chosen))
+            }
+        }
+        .labelsHidden()
+        .help("For MIDI note and MIDI Show Control Actions")
     }
 }
