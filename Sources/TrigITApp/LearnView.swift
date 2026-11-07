@@ -114,61 +114,71 @@ struct LearnSheet: View {
     private var portIsValid: Bool { (1...65535).contains(oscPort) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.headline)
-            Text(hint).font(.callout).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-            GroupBox("MIDI inputs") {
-                VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title).font(TrigType.sectionTitle)
+            Text(hint).font(.system(size: 16)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8) {
+                GroupHeader("MIDI inputs")
+                GroupedBox {
                     if model.midiSources.isEmpty {
-                        Text("No MIDI sources").foregroundColor(.secondary)
+                        FormRow(label: "No MIDI sources") { EmptyView() }.foregroundColor(.secondary)
                     }
-                    ForEach(model.midiSources) { source in
-                        Toggle(source.name, isOn: included(source.uniqueID))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if listensForOSC {
-                GroupBox("OSC") {
-                    HStack {
-                        Text("Port")
-                        TextField("Port", value: $oscPort, format: .number.grouping(.never))
-                            .frame(width: 70)
-                            .foregroundColor(portIsValid ? .primary : .red)
-                            .accessibilityLabel("OSC port")
-                        Picker("Interface", selection: $oscInterface) {
-                            Text("Any interface").tag("")
-                            ForEach(model.networkInterfaces) { Text($0.label).tag($0.name) }
+                    ForEach(Array(model.midiSources.enumerated()), id: \.element.id) { index, source in
+                        if index > 0 { RowDivider() }
+                        FormRow(label: source.name) {
+                            Toggle(source.name, isOn: included(source.uniqueID)).toggleStyle(.switch).labelsHidden()
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            Group {
-                if let secondsLeft = learner.secondsLeft {
-                    HStack {
-                        ProgressView().controlSize(.small)
-                        Text("Listening… \(secondsLeft) s")
+            if listensForOSC {
+                VStack(alignment: .leading, spacing: 8) {
+                    GroupHeader("OSC")
+                    GroupedBox {
+                        FormRow(label: "Port") {
+                            TextField("Port", value: $oscPort, format: .number.grouping(.never))
+                                .labelsHidden()
+                                .font(TrigType.body.monospacedDigit())
+                                .frame(width: 100)
+                                .foregroundColor(portIsValid ? .primary : StateColor.alert)
+                                .accessibilityLabel("OSC port")
+                        }
+                        RowDivider()
+                        FormRow(label: "Interface") {
+                            Picker("Interface", selection: $oscInterface) {
+                                Text("Any interface").tag("")
+                                ForEach(model.networkInterfaces) { Text($0.label).tag($0.name) }
+                            }
+                            .labelsHidden()
+                            .frame(width: 240)
+                        }
                     }
-                } else if let problem = learner.problem {
-                    Text(problem).foregroundColor(.red)
                 }
             }
-            .frame(minHeight: 20)
-            HStack {
+            HStack(spacing: 10) {
+                if let secondsLeft = learner.secondsLeft {
+                    ProgressView().controlSize(.small)
+                    Text("Listening, \(secondsLeft) s left").font(TrigType.body).monospacedDigit()
+                } else if let problem = learner.problem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .font(TrigType.body).foregroundColor(StateColor.alert)
+                }
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
+                    .capsuleButton()
                 if learner.isListening {
-                    Button("Stop") { learner.stop() }
+                    Button("Stop") { learner.stop() }.capsuleButton()
                 } else {
                     Button("Learn") { start() }
                         .keyboardShortcut(.defaultAction)
+                        .prominentCapsuleButton()
                 }
             }
+            .frame(minHeight: 36)
         }
-        .padding()
-        .frame(width: 440)
+        .padding(26)
+        .frame(width: 560)
         .onAppear { start() }
         .onChange(of: oscPort) { _ in if learner.isListening { start() } }
         .onChange(of: oscInterface) { _ in if learner.isListening { start() } }
