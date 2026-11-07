@@ -26,7 +26,7 @@ public struct MIDINote: Hashable, Sendable, Codable {
 /// A MIDI Show Control command (MSC 1.0), sent as SysEx:
 /// F0 7F <device ID> 02 <command format> <command> <data> F7.
 public struct MSCCommand: Hashable, Sendable, Codable {
-    public enum Command: UInt8, Hashable, Sendable, Codable, CaseIterable {
+    public enum Command: UInt8, Hashable, Sendable, CaseIterable {
         case go = 0x01
         case stop = 0x02
         case resume = 0x03
@@ -95,5 +95,22 @@ public struct MSCCommand: Hashable, Sendable, Codable {
         if text.isEmpty { return allowEmpty }
         let parts = text.split(separator: ".", omittingEmptySubsequences: false)
         return parts.count <= 2 && parts.allSatisfy { !$0.isEmpty && $0.allSatisfy { ("0"..."9").contains($0) } }
+    }
+}
+
+extension MSCCommand.Command: Codable {
+    /// Written by name ("go", "stop", "resume") so Set files read naturally.
+    public init(from decoder: Decoder) throws {
+        let name = try decoder.singleValueContainer().decode(String.self)
+        guard let command = Self.allCases.first(where: { $0.name.lowercased() == name.lowercased() }) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "\"\(name)\" is not an MSC command (go, stop or resume)"))
+        }
+        self = command
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(name.lowercased())
     }
 }

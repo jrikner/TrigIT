@@ -9,7 +9,7 @@ public typealias FrameRate = TrigITProtocols.FrameRate
 /// Timecodes order by their fields, so two positions compare correctly whatever
 /// frame rate is running. A Set stores no frame rate, so Song times are plain
 /// positions.
-public struct Timecode: Hashable, Comparable, Sendable, Codable, CustomStringConvertible {
+public struct Timecode: Hashable, Comparable, Sendable, CustomStringConvertible {
     public let hours: Int
     public let minutes: Int
     public let seconds: Int
