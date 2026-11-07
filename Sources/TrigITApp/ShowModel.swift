@@ -13,6 +13,15 @@ enum TimecodeSourceChoice: Hashable {
     case mtc(sourceID: Int32)
     /// Art-Net Timecode on a network interface (BSD name), or on any interface if nil.
     case artNet(interface: String?)
+
+    var kind: TimecodeSourceKind {
+        switch self {
+        case .simulator: return .simulator
+        case .ltc: return .ltc
+        case .mtc: return .mtc
+        case .artNet: return .artNet
+        }
+    }
 }
 
 /// Connects the pure Show Engine, the Timecode Sources and the network sender
@@ -41,12 +50,21 @@ final class ShowModel: ObservableObject {
     @Published private(set) var log: [LogEntry] = []
     @Published private(set) var simulator = Simulator(frameRate: .fps25)
     @Published private(set) var networkInterfaces: [NetworkInterfaceInfo] = []
+    /// The Primary Source.
     @Published private(set) var source: TimecodeSourceChoice = .simulator
+    /// The optional Backup Source, always of a different kind than the Primary.
+    @Published private(set) var backupSource: TimecodeSourceChoice?
+    /// The source the engine follows right now.
+    @Published private(set) var liveSource: SourceRole = .primary
+    /// Which sources are sending timecode right now.
+    @Published private(set) var healthySources: Set<SourceRole> = []
+    /// The timecode problem the banner shows, if any.
+    @Published private(set) var alert: TimecodeAlert?
     @Published private(set) var audioInputDevices: [AudioInputDevice] = []
     @Published private(set) var midiSources: [MIDISourceInfo] = []
     @Published private(set) var midiOutputs: [MIDIOutputInfo] = []
-    /// Whether timecode is arriving from the chosen source right now.
-    @Published private(set) var isReceiving = false
+    /// Whether timecode is arriving from the live source right now.
+    var isReceiving: Bool { healthySources.contains(liveSource) }
     /// While locked the Set is read-only; arming and the Simulator still work.
     @Published private(set) var isShowLocked = false
     /// The last Song edit refused because it would overlap other Songs.
@@ -86,10 +104,6 @@ final class ShowModel: ObservableObject {
     private let artNetInput = ArtNetTimecodeInput()
     private var timer: Timer?
     private var lastFedTimecode: Timecode?
-    private var lastReadingTime: Double?
-
-    /// No reading for this long means the signal is gone (LTC sends one per frame).
-    private static let signalTimeout = 0.25
 
     private static let maxLogEntries = 500
 
@@ -364,28 +378,46 @@ final class ShowModel: ObservableObject {
 
     // MARK: Timecode Source
 
+    /// Chooses the Primary Source. A Backup of the same kind is dropped,
+    /// since each kind has one input.
     func selectSource(_ choice: TimecodeSourceChoice) {
         guard choice != source else { return }
         source = choice
+        record("Primary Source: \(sourceLabel(choice))")
+        if backupSource?.kind == choice.kind {
+            backupSource = nil
+            record("Backup Source: none")
+        }
+        restartInputs()
+    }
+
+    /// Chooses the Backup Source, or none. It must be a different kind than the Primary.
+    func selectBackupSource(_ choice: TimecodeSourceChoice?) {
+        guard choice != backupSource, choice?.kind != source.kind else { return }
+        backupSource = choice
+        record("Backup Source: \(choice.map(sourceLabel) ?? "none")")
+        restartInputs()
+    }
+
+    /// The chosen source of a kind, if the Primary or Backup is of that kind.
+    private func choice(of kind: TimecodeSourceKind) -> TimecodeSourceChoice? {
+        [source, backupSource].lazy.compactMap { $0 }.first { $0.kind == kind }
+    }
+
+    /// Whether readings of a kind come from the Primary or the Backup, or neither.
+    private func role(of kind: TimecodeSourceKind) -> SourceRole? {
+        if source.kind == kind { return .primary }
+        return backupSource?.kind == kind ? .backup : nil
+    }
+
+    private func restartInputs() {
         ltcInput.stop()
         midiInput.disconnect()
         artNetInput.stop()
-        isReceiving = false
-        lastReadingTime = nil
         lastFedTimecode = nil
-        switch choice {
-        case .simulator:
-            record("Timecode Source: Simulator")
-        case .ltc:
-            record("Timecode Source: \(sourceLabel(choice))")
-            startLTC()
-        case .mtc:
-            record("Timecode Source: \(sourceLabel(choice))")
-            startMTC()
-        case .artNet:
-            record("Timecode Source: \(sourceLabel(choice))")
-            startArtNet()
-        }
+        if choice(of: .ltc) != nil { startLTC() }
+        if choice(of: .mtc) != nil { startMTC() }
+        if choice(of: .artNet) != nil { startArtNet() }
     }
 
     func sourceLabel(_ choice: TimecodeSourceChoice) -> String {
@@ -405,7 +437,7 @@ final class ShowModel: ObservableObject {
     }
 
     private func startArtNet() {
-        guard case .artNet(let interface) = source else { return }
+        guard case .artNet(let interface) = choice(of: .artNet) else { return }
         do {
             try artNetInput.start(interface: interface)
         } catch {
@@ -414,13 +446,13 @@ final class ShowModel: ObservableObject {
     }
 
     private func receiveArtNet(_ packet: [UInt8], at time: Double) {
-        guard case .artNet = source, let artTimeCode = ArtTimeCode(packet: packet),
+        guard let role = role(of: .artNet), let artTimeCode = ArtTimeCode(packet: packet),
               let timecode = Timecode(artTimeCode.fields) else { return }
-        feed(TimecodeReading(timecode: timecode, frameRate: artTimeCode.frameRate, source: .artNet, timestamp: time))
+        feed(TimecodeReading(timecode: timecode, frameRate: artTimeCode.frameRate, source: .artNet, timestamp: time), from: role)
     }
 
     private func startMTC() {
-        guard case .mtc(let id) = source else { return }
+        guard case .mtc(let id) = choice(of: .mtc) else { return }
         midiParser = MIDIParser()
         mtcDecoder = MTCDecoder()
         if !midiInput.connect(to: id) {
@@ -431,19 +463,19 @@ final class ShowModel: ObservableObject {
     private func midiSourcesChanged() {
         midiSources = midiInput.sources()
         // The chosen source may have come back or gone; reconnect either way.
-        if case .mtc = source { startMTC() }
+        if choice(of: .mtc) != nil { startMTC() }
     }
 
     private func receiveMIDI(_ bytes: [UInt8], at time: Double) {
-        guard case .mtc = source else { return }
+        guard let role = role(of: .mtc) else { return }
         for message in midiParser.parse(bytes) {
             guard let mtc = mtcDecoder.receive(message), let timecode = Timecode(mtc.fields) else { continue }
-            feed(TimecodeReading(timecode: timecode, frameRate: mtc.frameRate, source: .mtc, timestamp: time))
+            feed(TimecodeReading(timecode: timecode, frameRate: mtc.frameRate, source: .mtc, timestamp: time), from: role)
         }
     }
 
     private func startLTC() {
-        guard case .ltc(let uid, let channel) = source else { return }
+        guard case .ltc(let uid, let channel) = choice(of: .ltc) else { return }
         guard let device = audioInputDevices.first(where: { $0.uid == uid }) else {
             record("LTC device is not connected; waiting for it", isError: true)
             return
@@ -459,23 +491,23 @@ final class ShowModel: ObservableObject {
         let names = Set(networkInterfaces.map(\.name))
         networkInterfaces = interfaces
         // An interface came or went: rebind so a replugged cable is picked up again.
-        if case .artNet = source, names != Set(interfaces.map(\.name)) { startArtNet() }
+        if choice(of: .artNet) != nil, names != Set(interfaces.map(\.name)) { startArtNet() }
     }
 
     private func audioDevicesChanged() {
         audioInputDevices = audioDevices.inputDevices()
         // The chosen device may have come back or gone; reopen it either way.
-        if case .ltc = source {
+        if choice(of: .ltc) != nil {
             ltcInput.stop()
             startLTC()
         }
     }
 
     private func receive(_ frame: LTCFrame, at time: Double) {
-        guard case .ltc = source,
+        guard let role = role(of: .ltc),
               let timecode = Timecode(hours: frame.hours, minutes: frame.minutes, seconds: frame.seconds, frames: frame.frames)
         else { return }
-        feed(TimecodeReading(timecode: timecode, frameRate: frame.frameRate, source: .ltc, timestamp: time))
+        feed(TimecodeReading(timecode: timecode, frameRate: frame.frameRate, source: .ltc, timestamp: time), from: role)
     }
 
     // MARK: Simulator
@@ -514,18 +546,15 @@ final class ShowModel: ObservableObject {
     }
 
     private func tick() {
-        if source == .simulator, let reading = simulator.reading(at: now), reading.timecode != lastFedTimecode {
-            feed(reading)
+        if let role = role(of: .simulator), let reading = simulator.reading(at: now), reading.timecode != lastFedTimecode {
+            lastFedTimecode = reading.timecode
+            feed(reading, from: role)
         }
         apply(engine.tick(at: now))
-        let receiving = lastReadingTime.map { now - $0 < Self.signalTimeout } ?? false
-        if receiving != isReceiving { isReceiving = receiving }
     }
 
-    private func feed(_ reading: TimecodeReading) {
-        lastFedTimecode = reading.timecode
-        lastReadingTime = now
-        apply(engine.handle(reading))
+    private func feed(_ reading: TimecodeReading, from role: SourceRole) {
+        apply(engine.handle(reading, from: role))
     }
 
     // MARK: Engine events
@@ -573,6 +602,38 @@ final class ShowModel: ObservableObject {
             record(armed ? "Armed" : "Disarmed")
         case .jumped:
             break
+        case .sourceHealthChanged(let role, let healthy):
+            if healthy { healthySources.insert(role) } else { healthySources.remove(role) }
+        case .liveSourceChanged(let role):
+            liveSource = role
+            record("Switched to the \(roleLabel(role)): \(sourceLabel(for: role))", isError: role == .backup)
+        case .alertChanged(let newAlert):
+            alert = newAlert
+            if let newAlert {
+                record(Self.alertText(newAlert), isError: true)
+            } else if liveSource == .backup {
+                record("Primary Source is back; staying on the Backup until the next Stop")
+            } else if !engine.isStopped {
+                record("Timecode is back")
+            }
+        }
+    }
+
+    func roleLabel(_ role: SourceRole) -> String {
+        role == .primary ? "Primary Source" : "Backup Source"
+    }
+
+    /// The label of the source playing a role ("none" for a missing Backup).
+    func sourceLabel(for role: SourceRole) -> String {
+        guard let choice = role == .primary ? source : backupSource else { return "none" }
+        return sourceLabel(choice)
+    }
+
+    /// What the banner and the fire log say for an alert.
+    static func alertText(_ alert: TimecodeAlert) -> String {
+        switch alert {
+        case .primaryLostRunningOnBackup: return "Primary lost / running on Backup"
+        case .allTimecodeLost: return "All timecode lost"
         }
     }
 
