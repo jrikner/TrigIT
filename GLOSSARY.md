@@ -44,12 +44,20 @@ The show: an ordered list of Songs, each with its own span of timecode.
 _Avoid_: Show file, playlist, cue list
 
 **Song**:
-One piece of music in the Set, owning a span of timecode from a start to an end time, and the Actions to send when that span is entered. Timecode between Songs belongs to no Song.
+One piece of music in the Set, owning a span of timecode from a start to an end time, its Start Actions and its optional Stop Actions. Timecode between Songs belongs to no Song.
 _Avoid_: Track (clashes with Ableton's tracks), cue, scene
 
 **Action**:
 One outgoing message a Song sends: an OSC message, a MIDI message, or an Art-Net/sACN pulse.
 _Avoid_: Command, output, trigger
+
+**Start Actions**:
+The Actions a Song sends on Entering.
+_Avoid_: On-enter, cue
+
+**Stop Actions**:
+The optional Actions a Song sends on Ending, used for example for a DJ pull-up that must tell other gear the set has stopped. Usually empty.
+_Avoid_: Exit actions, release, off-cue
 
 **Destination**:
 A named device that Actions are sent to, such as "Resolume" or "MA3", holding its network address and/or MIDI port. Each Action names one Destination.
@@ -59,8 +67,12 @@ _Avoid_: Endpoint, target, output, device
 The Playhead arriving inside a Song's span from outside it, by playing into it or by a Jump landing anywhere inside it.
 _Avoid_: Hitting, reaching
 
+**Ending**:
+A Song being left by a Stop while the Playhead is inside it, or by the Playhead playing on past its end time. A Jump out of a Song is not Ending.
+_Avoid_: Exiting, leaving, release
+
 **Firing**:
-A Song sending all its Actions, once, on Entering. Moving or jumping within the same Song does not fire it again; leaving it, or a Stop, re-arms it.
+A Song sending all its Start Actions, once, on Entering. Moving or jumping within the same Song does not fire it again; leaving it, or a Stop, re-arms it.
 _Avoid_: Triggering, executing
 
 **Armed**:
