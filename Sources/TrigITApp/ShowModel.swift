@@ -3,9 +3,17 @@ import SwiftUI // for MutableCollection.move(fromOffsets:toOffset:)
 import TrigITEngine
 import TrigITProtocols
 
-/// Connects the pure Show Engine, the Simulator and the network sender to the
-/// UI. It owns the clock: a timer polls the Simulator and feeds each new
-/// reading to the engine, and every send the engine asks for goes out here.
+/// The Timecode Source the show follows.
+enum TimecodeSourceChoice: Hashable {
+    case simulator
+    /// LTC on one channel (0-based) of an audio input, remembered by device UID.
+    case ltc(deviceUID: String, channel: Int)
+}
+
+/// Connects the pure Show Engine, the Timecode Sources and the network sender
+/// to the UI. It owns the clock: a timer polls the Simulator and watches for
+/// lost signal, each reading goes to the engine, and every send the engine
+/// asks for goes out here.
 @MainActor
 final class ShowModel: ObservableObject {
     /// One line in the fire log.
@@ -25,11 +33,21 @@ final class ShowModel: ObservableObject {
     @Published private(set) var log: [LogEntry] = []
     @Published private(set) var simulator = Simulator(frameRate: .fps25)
     @Published private(set) var networkInterfaces: [NetworkInterfaceInfo] = []
+    @Published private(set) var source: TimecodeSourceChoice = .simulator
+    @Published private(set) var audioInputDevices: [AudioInputDevice] = []
+    /// Whether timecode is arriving from the chosen source right now.
+    @Published private(set) var isReceiving = false
 
     private var engine: ShowEngine
     private let sender = UDPSender()
+    private let audioDevices = AudioDeviceList()
+    private let ltcInput = LTCAudioInput()
     private var timer: Timer?
     private var lastFedTimecode: Timecode?
+    private var lastReadingTime: Double?
+
+    /// No reading for this long means the signal is gone (LTC sends one per frame).
+    private static let signalTimeout = 0.25
 
     private static let maxLogEntries = 500
 
@@ -37,6 +55,9 @@ final class ShowModel: ObservableObject {
         self.set = set
         self.engine = ShowEngine(set: set, armed: false)
         sender.onInterfacesChanged = { [weak self] interfaces in self?.networkInterfaces = interfaces }
+        audioDevices.onChange = { [weak self] in self?.audioDevicesChanged() }
+        ltcInput.onFrame = { [weak self] frame, time in self?.receive(frame, at: time) }
+        audioInputDevices = audioDevices.inputDevices()
         startClock()
     }
 
@@ -130,6 +151,63 @@ final class ShowModel: ObservableObject {
         set.destination(id)?.name ?? "missing Destination"
     }
 
+    // MARK: Timecode Source
+
+    func selectSource(_ choice: TimecodeSourceChoice) {
+        guard choice != source else { return }
+        source = choice
+        ltcInput.stop()
+        isReceiving = false
+        lastReadingTime = nil
+        lastFedTimecode = nil
+        switch choice {
+        case .simulator:
+            record("Timecode Source: Simulator")
+        case .ltc:
+            record("Timecode Source: \(sourceLabel(choice))")
+            startLTC()
+        }
+    }
+
+    func sourceLabel(_ choice: TimecodeSourceChoice) -> String {
+        switch choice {
+        case .simulator:
+            return "Simulator"
+        case .ltc(let uid, let channel):
+            let name = audioInputDevices.first { $0.uid == uid }?.name ?? "missing device"
+            return "LTC: \(name), channel \(channel + 1)"
+        }
+    }
+
+    private func startLTC() {
+        guard case .ltc(let uid, let channel) = source else { return }
+        guard let device = audioInputDevices.first(where: { $0.uid == uid }) else {
+            record("LTC device is not connected; waiting for it", isError: true)
+            return
+        }
+        ltcInput.start(device: device.id, channel: channel) { [weak self] error in
+            if let error {
+                self?.record("LTC input failed: \(error.localizedDescription)", isError: true)
+            }
+        }
+    }
+
+    private func audioDevicesChanged() {
+        audioInputDevices = audioDevices.inputDevices()
+        // The chosen device may have come back or gone; reopen it either way.
+        if case .ltc = source {
+            ltcInput.stop()
+            startLTC()
+        }
+    }
+
+    private func receive(_ frame: LTCFrame, at time: Double) {
+        guard case .ltc = source,
+              let timecode = Timecode(hours: frame.hours, minutes: frame.minutes, seconds: frame.seconds, frames: frame.frames)
+        else { return }
+        feed(TimecodeReading(timecode: timecode, frameRate: frame.frameRate, source: .ltc, timestamp: time))
+    }
+
     // MARK: Simulator
 
     func play(from position: Timecode? = nil) {
@@ -166,8 +244,16 @@ final class ShowModel: ObservableObject {
     }
 
     private func tick() {
-        guard let reading = simulator.reading(at: now), reading.timecode != lastFedTimecode else { return }
+        if source == .simulator, let reading = simulator.reading(at: now), reading.timecode != lastFedTimecode {
+            feed(reading)
+        }
+        let receiving = lastReadingTime.map { now - $0 < Self.signalTimeout } ?? false
+        if receiving != isReceiving { isReceiving = receiving }
+    }
+
+    private func feed(_ reading: TimecodeReading) {
         lastFedTimecode = reading.timecode
+        lastReadingTime = now
         apply(engine.handle(reading))
     }
 

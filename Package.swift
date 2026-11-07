@@ -12,7 +12,12 @@ var products: [Product] = [
 var targets: [Target] = [
     // Pure encoders and decoders for the show protocols (OSC, MIDI, Art-Net, sACN, LTC).
     .target(name: "TrigITProtocols"),
-    .testTarget(name: "TrigITProtocolsTests", dependencies: ["TrigITProtocols"]),
+    .testTarget(
+        name: "TrigITProtocolsTests",
+        dependencies: ["TrigITProtocols"],
+        // Reference LTC recordings made with libltc (see Fixtures/README.md).
+        resources: [.copy("Fixtures")]
+    ),
     // The Show Engine: follows timecode and decides what fires. No I/O.
     .target(name: "TrigITEngine", dependencies: ["TrigITProtocols"]),
     .testTarget(name: "TrigITEngineTests", dependencies: ["TrigITEngine"]),

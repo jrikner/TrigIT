@@ -17,3 +17,7 @@ swift test
 ```
 
 The Show Engine (`Sources/TrigITEngine`) and the protocol codecs (`Sources/TrigITProtocols`) are pure Swift with no platform dependencies, so their tests also run on Linux. The SwiftUI app (`Sources/TrigITApp`) only builds on macOS.
+
+## LTC input
+
+Pick "LTC: device, channel" as the Timecode Source on the show screen. macOS asks for audio input (microphone) permission the first time; when run with `swift run`, the permission belongs to Terminal (or whichever app launched it).
