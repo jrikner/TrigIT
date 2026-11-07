@@ -158,8 +158,10 @@ struct StatusBar: View {
             if model.backupSource != nil { sourceStatus(.backup) }
             Spacer()
             if let firing = model.lastFiringSummary {
-                Label(firing.text, systemImage: firing.failed ? "xmark.circle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(firing.failed ? StateColor.alert : StateColor.ok, .primary)
+                Label(firing.text, systemImage: firing.failed == true ? "xmark.circle.fill"
+                      : firing.failed == false ? "checkmark.circle.fill" : "bolt.slash")
+                    .foregroundStyle(firing.failed == true ? StateColor.alert : firing.failed == false ? StateColor.ok : StateColor.idle,
+                                     .primary)
                     .lineLimit(1)
             }
             Text(model.frameRate.map { "\($0.rawValue) fps" } ?? "-- fps")
@@ -192,7 +194,10 @@ struct SourceRoleState {
     @MainActor
     init(_ model: ShowModel, _ role: SourceRole) {
         let healthy = model.healthySources.contains(role) || (role == .primary ? model.source : model.backupSource) == .simulator
-        if model.liveSource == role {
+        if (role == .primary ? model.source : model.backupSource) == .simulator, !model.simulator.isPlaying {
+            word = "Stopped"
+            color = StateColor.idle
+        } else if model.liveSource == role {
             word = healthy ? "Live" : "Lost"
             color = healthy ? (role == .backup ? StateColor.caution : StateColor.ok) : StateColor.alert
         } else {

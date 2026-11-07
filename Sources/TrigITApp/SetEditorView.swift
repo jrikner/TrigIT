@@ -422,7 +422,7 @@ struct ActionRow: View {
                     case .dmxPulse(let pulse): DMXPulseFields(pulse: pulse) { update(.dmxPulse($0)) }
                     }
                 }
-                .font(TrigType.code)
+                .font(.system(size: 15))
                 .lineLimit(1)
             }
             .disabled(model.isShowLocked)
@@ -703,7 +703,7 @@ struct OSCActionFields: View {
             }
         ), prompt: Text("/osc/address"))
         .labelsHidden()
-        .font(.system(.body, design: .monospaced))
+        .font(TrigType.code)
         .foregroundColor(message.hasValidAddress ? .primary : .red)
         .frame(minWidth: 80)
 
@@ -719,9 +719,9 @@ struct OSCActionFields: View {
             }
         ), prompt: Text("arguments"))
         .labelsHidden()
-        .font(.system(.body, design: .monospaced))
+        .font(TrigType.code)
         .foregroundColor(OSCArgument.parseList(argumentsText) == nil ? .red : .primary)
-        .frame(minWidth: 70, idealWidth: 140, maxWidth: 140)
+        .frame(minWidth: 120, idealWidth: 220, maxWidth: 260)
     }
 }
 
@@ -734,7 +734,7 @@ struct MIDINoteFields: View {
         NumberField("MIDI note", value: Int(note.note), range: 0...127, width: 44) {
             onChange(MIDINote(channel: note.channel, note: UInt8($0), velocity: note.velocity))
         }
-        Text(note.noteName).font(.system(.body, design: .monospaced)).frame(width: 48, alignment: .leading)
+        Text(note.noteName).foregroundColor(.secondary).frame(width: 48, alignment: .leading)
         Text("Ch").foregroundColor(.secondary)
         NumberField("MIDI channel", value: Int(note.channel) + 1, range: 1...16, width: 36) {
             onChange(MIDINote(channel: UInt8($0 - 1), note: note.note, velocity: note.velocity))
@@ -774,6 +774,7 @@ struct MSCFields: View {
             }
         ), prompt: Text("next"))
         .labelsHidden()
+        .font(.system(size: 15).monospacedDigit())
         .frame(width: 76)
         Text("List").foregroundColor(.secondary)
         TextField("MSC list", text: Binding(
@@ -785,6 +786,7 @@ struct MSCFields: View {
             }
         ), prompt: Text("default"))
         .labelsHidden()
+        .font(.system(size: 15).monospacedDigit())
         .frame(width: 76)
         Text("Device").foregroundColor(.secondary)
         NumberField("MSC device ID", value: Int(command.deviceID), range: 0...127, width: 40) { id in
@@ -858,7 +860,7 @@ struct NumberField: View {
             }
         ))
         .labelsHidden()
-        .font(.system(.body, design: .monospaced))
+        .font(.system(size: 15).monospacedDigit())
         .foregroundColor(parsed == nil ? .red : .primary)
         .frame(width: width + 24)
         .onChange(of: value) { text = String($0) }

@@ -25,10 +25,17 @@ struct WelcomeView: View {
                 }
                 .frame(width: 440)
                 .padding(.top, 28)
+                if let url = model.documentURL {
+                    Button("Back to \(url.deletingPathExtension().lastPathComponent)") { model.showingWelcome = false }
+                        .capsuleButton()
+                        .keyboardShortcut(.cancelAction)
+                        .padding(.top, 20)
+                }
                 Spacer(minLength: 0)
             }
+            .frame(width: 440, alignment: .leading)
             .padding(.horizontal, 56)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
 
             FloatingPanel {
                 VStack(alignment: .leading, spacing: 8) {

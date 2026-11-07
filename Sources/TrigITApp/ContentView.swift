@@ -59,7 +59,8 @@ struct ContentView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 160)
+            .controlSize(.large)
+            .frame(width: 180)
             .help("Show (⌘1) or Edit (⌘2)")
         }
         ToolbarItemGroup(placement: .primaryAction) {

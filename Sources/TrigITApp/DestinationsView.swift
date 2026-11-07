@@ -151,7 +151,7 @@ struct DestinationDetail: View {
             if let send = model.destinationSends[destination.id] {
                 return send.ok ? "Last send at \(send.date.formatted(date: .omitted, time: .standard))" : (send.errorText ?? "")
             }
-            return state == .reachable ? "Replying" : "Nothing sent yet"
+            return state == .reachable ? "Responding on the network" : "Not heard from yet"
         }()
         return HStack(spacing: 8) {
             StateDot(color: state.color)
