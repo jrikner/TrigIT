@@ -500,30 +500,48 @@ struct ImportReportView: View {
     let summary: ImportSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Import from \(summary.fileName)").font(.headline)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Import from \(summary.fileName)").font(TrigType.sectionTitle)
             if let report = summary.report {
-                Text("Added \(report.imported.count) Song\(report.imported.count == 1 ? "" : "s").")
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundColor(StateColor.ok)
+                    Text("Added \(report.imported.count) Song\(report.imported.count == 1 ? "" : "s").")
+                }
+                .font(TrigType.body)
                 if report.problems.isEmpty {
-                    Text("Every row was imported.").foregroundColor(.secondary)
+                    Text("Every row was imported.").font(.system(size: 16)).foregroundColor(.secondary)
                 } else {
-                    Text("Skipped \(report.problems.count) row\(report.problems.count == 1 ? "" : "s"):")
-                        .foregroundColor(.orange)
-                    List(report.problems, id: \.self) { problem in
-                        Text("Line \(problem.line): \(problem.reason.description)")
+                    VStack(alignment: .leading, spacing: 8) {
+                        GroupHeader("Skipped \(report.problems.count) row\(report.problems.count == 1 ? "" : "s")")
+                        ScrollView {
+                            GroupedBox {
+                                ForEach(Array(report.problems.enumerated()), id: \.offset) { index, problem in
+                                    if index > 0 { RowDivider() }
+                                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                        Image(systemName: "exclamationmark.triangle.fill").foregroundColor(StateColor.caution)
+                                        Text("Line \(problem.line)").font(TrigType.rowTitle.monospacedDigit()).frame(width: 70, alignment: .leading)
+                                        Text(problem.reason.description).font(TrigType.body)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.vertical, 12)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 300)
                     }
-                    .frame(minHeight: 120)
                 }
             } else {
-                Text("The file could not be read as text.").foregroundColor(.red)
+                Label("The file could not be read as text.", systemImage: "xmark.circle.fill")
+                    .font(TrigType.body).foregroundStyle(StateColor.alert, .primary)
             }
             HStack {
                 Spacer()
-                Button("OK") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button("OK") { dismiss() }.keyboardShortcut(.defaultAction).prominentCapsuleButton()
             }
         }
-        .padding(20)
-        .frame(minWidth: 420)
+        .padding(26)
+        .frame(width: 560)
     }
 }
 
@@ -643,42 +661,53 @@ struct PresetSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Add Action from preset").font(.headline)
-            Form {
-                Picker("Preset", selection: $kind) {
-                    ForEach(Kind.allCases) { Text($0.rawValue).tag($0) }
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Add Action from Preset").font(TrigType.sectionTitle)
+            GroupedBox {
+                FormRow(label: "Preset") {
+                    Picker("Preset", selection: $kind) {
+                        ForEach(Kind.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .labelsHidden()
+                    .frame(width: 300)
                 }
                 ForEach(Array(numberLabels.enumerated()), id: \.offset) { index, label in
-                    TextField(label, value: index == 0 ? $first : $second, format: .number)
+                    RowDivider()
+                    FormRow(label: label) {
+                        TextField(label, value: index == 0 ? $first : $second, format: .number)
+                            .labelsHidden()
+                            .font(TrigType.body.monospacedDigit())
+                            .frame(width: 100)
+                    }
                 }
-                if kind == .ma3Command {
-                    TextField("Command", text: $text, prompt: Text("Go+ Exec 1.201"))
-                }
-                if kind == .ma3Cue {
-                    TextField("Cue", text: $text, prompt: Text("5 or 12.5"))
+                if kind == .ma3Command || kind == .ma3Cue {
+                    RowDivider()
+                    FormRow(label: kind == .ma3Command ? "Command" : "Cue") {
+                        TextField(kind == .ma3Command ? "Command" : "Cue", text: $text,
+                                  prompt: Text(kind == .ma3Command ? "Go+ Exec 1.201" : "5 or 12.5"))
+                            .labelsHidden()
+                            .font(TrigType.code)
+                            .frame(width: 220)
+                    }
                 }
             }
-            Text("Sends \(ShowModel.describe(preset.message)). The Action stays editable after adding.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            Footnote("Sends \(ShowModel.describe(preset.message)). The Action stays editable after adding.")
             if kind == .ma3Executor || kind == .ma3Command {
-                Text("On the console, turn on Receive Command for the OSC line. If it has a prefix, edit the address to start with it, like /gma3/cmd.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Footnote("On the console, turn on Receive Command for the OSC line. If it has a prefix, edit the address to start with it, like /gma3/cmd.")
             }
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).capsuleButton()
                 Button("Add") {
                     onAdd(preset)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
+                .prominentCapsuleButton()
             }
         }
-        .padding()
-        .frame(width: 440)
+        .padding(26)
+        .frame(width: 560)
     }
 }
 
