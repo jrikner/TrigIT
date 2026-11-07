@@ -20,33 +20,69 @@ public typealias DestinationID = EntityID<Destination>
 public typealias ActionID = EntityID<Action>
 public typealias SetID = EntityID<ShowSet>
 
-/// One piece of music in the Set: a span of timecode from `start` to `end`,
-/// both inclusive, and the Actions it sends. Timecode between Songs belongs to
-/// no Song.
+/// A MIDI note that triggers a Song: its Note On on this channel.
+public struct NoteTrigger: Hashable, Sendable, Codable {
+    /// 0...15 (shown to people as 1...16).
+    public var channel: UInt8
+    /// 0...127.
+    public var note: UInt8
+
+    public init(channel: UInt8, note: UInt8) {
+        self.channel = min(channel, 15)
+        self.note = min(note, 127)
+    }
+
+    /// "Ch 1 C3", naming notes as Ableton does.
+    public var description: String {
+        "Ch \(channel + 1) \(MIDINote(channel: channel, note: note).noteName)"
+    }
+}
+
+/// One piece of music in the Set and the Actions it sends. It is triggered by
+/// any combination of a span of timecode from `start` to `end` (both
+/// inclusive), a Start Note and a Stop Note, and needs at least one of them.
+/// Timecode between Songs belongs to no Song.
 public struct Song: Identifiable, Hashable, Sendable {
     public var id: SongID
     public var name: String
+    /// Whether the Song has a timecode span. Without one, `start` and `end`
+    /// are kept (so the editor can switch the span back on) but ignored.
+    public var hasSpan: Bool
     public var start: Timecode
     public var end: Timecode
+    /// Its Note On makes the Song Enter.
+    public var startNote: NoteTrigger?
+    /// Its Note On makes the Song End if it is current, or, for a Song with
+    /// only a Stop Note, sends its Stop Actions every time.
+    public var stopNote: NoteTrigger?
     /// Sent, in order, on Entering.
     public var startActions: [Action]
     /// Sent, in order, on Ending. Usually empty; used for DJ pull-ups.
     public var stopActions: [Action]
 
-    public init(id: SongID = SongID(), name: String, start: Timecode, end: Timecode,
+    public init(id: SongID = SongID(), name: String, start: Timecode = .zero, end: Timecode = .zero,
+                hasSpan: Bool = true, startNote: NoteTrigger? = nil, stopNote: NoteTrigger? = nil,
                 startActions: [Action] = [], stopActions: [Action] = []) {
         self.id = id
         self.name = name
+        self.hasSpan = hasSpan
         self.start = start
         self.end = end
+        self.startNote = startNote
+        self.stopNote = stopNote
         self.startActions = startActions
         self.stopActions = stopActions
     }
 
-    /// Whether `position` lies inside this Song's span. A Song whose end is
-    /// before its start contains nothing.
+    /// Whether `position` lies inside this Song's span. A Song with no span,
+    /// or whose end is before its start, contains nothing.
     public func contains(_ position: Timecode) -> Bool {
-        start <= position && position <= end
+        hasSpan && start <= position && position <= end
+    }
+
+    /// Whether anything can trigger the Song: a span, a Start Note or a Stop Note.
+    public var hasTrigger: Bool {
+        hasSpan || startNote != nil || stopNote != nil
     }
 }
 

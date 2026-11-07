@@ -2,10 +2,10 @@
 
 extension Song {
     /// Whether this Song's span shares at least one frame with `other`'s. Spans
-    /// include both ends; a Song whose end is before its start has no span and
-    /// overlaps nothing.
+    /// include both ends; a Song with no span, or whose end is before its
+    /// start, overlaps nothing.
     public func overlaps(_ other: Song) -> Bool {
-        start <= end && other.start <= other.end && start <= other.end && other.start <= end
+        hasSpan && other.hasSpan && start <= end && other.start <= other.end && start <= other.end && other.start <= end
     }
 }
 

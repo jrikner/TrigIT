@@ -1,3 +1,5 @@
+import TrigITProtocols
+
 /// The kind of Timecode Source a reading came from.
 public enum TimecodeSourceKind: String, Sendable, Codable, CaseIterable {
     case simulator
@@ -74,6 +76,8 @@ public enum EngineEvent: Hashable, Sendable {
 public enum FiringCause: Hashable, Sendable {
     /// The Playhead entered it.
     case entering
+    /// Its Start Note arrived.
+    case note
     /// The operator fired it by hand.
     case manual
 }
@@ -84,6 +88,8 @@ public enum EndingCause: Hashable, Sendable {
     case stop
     /// The Playhead played on past its end time.
     case playedPastEnd
+    /// Its Stop Note arrived.
+    case note
     /// The operator pressed Fire stop.
     case manual
 }
@@ -92,7 +98,7 @@ public enum EndingCause: Hashable, Sendable {
 public struct OutgoingAction: Hashable, Sendable {
     /// Why the Action is being sent.
     public enum Reason: Hashable, Sendable {
-        /// A Start Action, because the Playhead entered the Song.
+        /// A Start Action, because the Song Entered (by timecode or its Start Note).
         case entering
         /// A Stop Action, because the Song Ended.
         case ending
@@ -131,7 +137,13 @@ public struct ShowEngine: Sendable {
     public private(set) var set: ShowSet
     public private(set) var playhead: Timecode?
     public private(set) var frameRate: FrameRate?
+    /// The Song most recently Entered, by timecode or by its Start Note, until
+    /// it Ends or another Song Enters.
     public private(set) var currentSongID: SongID?
+    /// The Song whose span contains the Playhead. Timecode Enters a Song only
+    /// when this changes, so a Song a note made current is not fired again by
+    /// timecode, and timecode outside every Song leaves it current.
+    private var timecodeSongID: SongID?
     /// When disarmed, the engine follows timecode and tracks the current Song
     /// but sends nothing.
     public private(set) var isArmed: Bool
@@ -226,22 +238,58 @@ public struct ShowEngine: Sendable {
         lastReading = reading
 
         let songID = set.song(at: reading.timecode)?.id
-        guard songID != currentSongID else { return events }
+        guard songID != timecodeSongID else { return events }
+        let left = timecodeSongID
+        timecodeSongID = songID
+        // Only leaving the current Song matters; one a note displaced is gone already.
+        let leftCurrent = left != nil && left == currentSongID
 
         // Leaving a Song by playing on past its end time Ends it, before the next
         // Song fires. A Jump out of a Song, or playing backwards out of it, does not.
-        if let current = currentSongID, !jumped,
-           let song = set.songs.first(where: { $0.id == current }), reading.timecode > song.end {
-            events += end(current, cause: .playedPastEnd)
+        if leftCurrent, let left, !jumped,
+           let song = set.songs.first(where: { $0.id == left }), reading.timecode > song.end {
+            events += end(left, cause: .playedPastEnd)
         }
 
         // Entering: the Playhead arrives inside a Song from outside it, whether
-        // by playing or by a Jump. Staying inside the same Song never fires again.
-        currentSongID = songID
-        events.append(.currentSongChanged(songID))
+        // by playing or by a Jump. Staying inside the same Song never fires
+        // again, nor does arriving in a Song its Start Note already made current.
         if let songID {
-            events.append(.fired(songID, .entering))
-            events += sends(for: songID, \.startActions, reason: .entering)
+            guard songID != currentSongID else { return events }
+            events += enter(songID, cause: .entering)
+        } else if leftCurrent {
+            currentSongID = nil
+            events.append(.currentSongChanged(nil))
+        }
+        return events
+    }
+
+    private mutating func enter(_ songID: SongID, cause: FiringCause) -> [EngineEvent] {
+        currentSongID = songID
+        return [.currentSongChanged(songID), .fired(songID, cause)]
+            + sends(for: songID, \.startActions, reason: .entering)
+    }
+
+    /// Feeds one incoming MIDI message. A Note On that is some Song's Stop Note
+    /// Ends that Song if it is current (or, for a Song with only a Stop Note,
+    /// sends its Stop Actions every time); then a Note On that is some Song's
+    /// Start Note makes it Enter unless it is already current. Note Off, and
+    /// Note On with velocity 0, are ignored, as is everything else.
+    public mutating func handleMIDI(_ message: MIDIMessage) -> [EngineEvent] {
+        guard case .noteOn(let channel, let note, let velocity) = message, velocity > 0 else { return [] }
+        let trigger = NoteTrigger(channel: channel, note: note)
+        var events: [EngineEvent] = []
+        for song in set.songs where song.stopNote == trigger {
+            if !song.hasSpan && song.startNote == nil {
+                events += end(song.id, cause: .note)
+            } else if song.id == currentSongID {
+                events += end(song.id, cause: .note)
+                currentSongID = nil
+                events.append(.currentSongChanged(nil))
+            }
+        }
+        for song in set.songs where song.startNote == trigger && song.id != currentSongID {
+            events += enter(song.id, cause: .note)
         }
         return events
     }
@@ -258,6 +306,7 @@ public struct ShowEngine: Sendable {
         lastReading = nil
         resumedAt = nil
         var events: [EngineEvent] = [.stopped]
+        timecodeSongID = nil
         if let current = currentSongID {
             events += end(current, cause: .stop)
             currentSongID = nil

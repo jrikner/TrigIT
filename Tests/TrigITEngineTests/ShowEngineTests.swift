@@ -1,5 +1,6 @@
 import XCTest
 import TrigITEngine
+import TrigITProtocols
 
 /// Scenario tests: a scripted timeline of readings goes in; only the events
 /// that come out are checked.
@@ -154,6 +155,7 @@ final class Timeline {
     }
 
     func fire(_ id: SongID) { events += engine.fire(id) }
+    func midi(_ message: MIDIMessage) { events += engine.handleMIDI(message) }
     func fireStop(_ id: SongID) { events += engine.fireStop(id) }
     func clearEvents() { events.removeAll() }
 

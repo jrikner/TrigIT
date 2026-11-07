@@ -174,6 +174,7 @@ struct SongRow: View {
                         model.update(edited)
                     }
                 ))
+                Group {
                 TimecodeField("Start", value: song.start) { start in
                     var edited = song
                     edited.start = start
@@ -184,6 +185,9 @@ struct SongRow: View {
                     edited.end = end
                     return model.update(edited)
                 }
+                }
+                .disabled(!song.hasSpan)
+                .opacity(song.hasSpan ? 1 : 0.4)
                 }
                 .disabled(model.isShowLocked)
 
@@ -196,7 +200,12 @@ struct SongRow: View {
                 Text(actionSummary)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                if song.end < song.start {
+                if let notes = noteSummary {
+                    Text(notes)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                if song.hasSpan && song.end < song.start {
                     Text("End is before start: this Song never fires")
                         .font(.caption)
                         .foregroundColor(.red)
@@ -232,6 +241,13 @@ struct SongRow: View {
         .buttonStyle(.borderless)
     }
 
+    private var noteSummary: String? {
+        let notes = [song.startNote.map { "Start Note \($0.description)" },
+                     song.stopNote.map { "Stop Note \($0.description)" }].compactMap { $0 }
+        let parts = (song.hasSpan ? [] : ["no timecode span"]) + notes
+        return parts.isEmpty ? nil : "· " + parts.joined(separator: ", ")
+    }
+
     private var actionSummary: String {
         let start = song.startActions.isEmpty ? "No Start Actions" : "\(song.startActions.count) Start Action(s)"
         return song.stopActions.isEmpty ? start : start + ", \(song.stopActions.count) Stop Action(s)"
@@ -241,6 +257,102 @@ struct SongRow: View {
     private var isInConflict: Bool {
         guard let refused = model.refusedEdit else { return false }
         return refused.songID == song.id || refused.conflicts.contains(song.id)
+    }
+}
+
+// MARK: - Triggers
+
+/// What triggers the selected Song: its timecode span, Start Note and Stop
+/// Note, in any combination but at least one.
+struct SongTriggersEditor: View {
+    @EnvironmentObject private var model: ShowModel
+    let song: Song
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Toggle("Timecode span", isOn: Binding(
+                get: { song.hasSpan },
+                set: { hasSpan in
+                    var edited = song
+                    edited.hasSpan = hasSpan
+                    model.update(edited)
+                }
+            ))
+            .help("Off: only the notes trigger this Song; its start and end are kept but ignored")
+            NoteTriggerField(label: "Start Note", value: song.startNote) { note in
+                var edited = song
+                edited.startNote = note
+                return model.update(edited)
+            }
+            .help("Its Note On makes the Song Enter: sends its Start Actions and makes it current, even with no timecode")
+            NoteTriggerField(label: "Stop Note", value: song.stopNote) { note in
+                var edited = song
+                edited.stopNote = note
+                return model.update(edited)
+            }
+            .help("Its Note On Ends the Song if it is current. With no span and no Start Note, it sends the Stop Actions every time")
+            Spacer()
+        }
+        .font(.callout)
+    }
+}
+
+/// A MIDI channel (1...16) and note number (0...127), or none when both are empty.
+struct NoteTriggerField: View {
+    let label: String
+    let value: NoteTrigger?
+    let onCommit: (NoteTrigger?) -> Bool
+    @State private var channel: String
+    @State private var note: String
+    @State private var refused = false
+
+    init(label: String, value: NoteTrigger?, onCommit: @escaping (NoteTrigger?) -> Bool) {
+        self.label = label
+        self.value = value
+        self.onCommit = onCommit
+        _channel = State(initialValue: value.map { String($0.channel + 1) } ?? "")
+        _note = State(initialValue: value.map { String($0.note) } ?? "")
+    }
+
+    /// nil: the text is not a valid trigger. .some(nil): both fields empty.
+    private var parsed: NoteTrigger?? {
+        if channel.isEmpty && note.isEmpty { return .some(nil) }
+        guard let ch = UInt8(channel), (1...16).contains(ch), let n = UInt8(note), n <= 127 else { return nil }
+        return .some(NoteTrigger(channel: ch - 1, note: n))
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label).foregroundColor(.secondary)
+            TextField("Ch", text: binding(isChannel: true), prompt: Text("ch"))
+                .frame(width: 34)
+                .accessibilityLabel("\(label) MIDI channel, 1 to 16")
+            TextField("Note", text: binding(isChannel: false), prompt: Text("note"))
+                .frame(width: 44)
+                .accessibilityLabel("\(label) note number, 0 to 127")
+            Text(value.map { MIDINote(channel: $0.channel, note: $0.note).noteName } ?? "")
+                .font(.caption.monospaced())
+                .foregroundColor(.secondary)
+                .frame(width: 30, alignment: .leading)
+        }
+        .labelsHidden()
+        .font(.system(.body, design: .monospaced))
+        .foregroundColor(parsed == nil || refused ? .red : .primary)
+        .onChange(of: value) { newValue in
+            channel = newValue.map { String($0.channel + 1) } ?? ""
+            note = newValue.map { String($0.note) } ?? ""
+            refused = false
+        }
+    }
+
+    private func binding(isChannel: Bool) -> Binding<String> {
+        Binding(
+            get: { isChannel ? channel : note },
+            set: { text in
+                if isChannel { channel = text } else { note = text }
+                if let trigger = parsed, trigger != value { refused = !onCommit(trigger) }
+            }
+        )
     }
 }
 
@@ -275,13 +387,15 @@ struct ActionsEditor: View {
                 .fixedSize()
                 .disabled(model.set.destinations.isEmpty || model.isShowLocked)
             }
+            SongTriggersEditor(song: song)
+                .disabled(model.isShowLocked)
             if model.set.destinations.isEmpty {
                 Text("Add a Destination first (Destinations tab).")
                     .foregroundColor(.secondary)
             }
             Text(list == .start
                  ? "Sent in this order when the Song is entered."
-                 : "Sent in this order when the Song ends: timecode stops inside it, or plays on past its end. Usually empty; for DJ pull-ups.")
+                 : "Sent in this order when the Song ends: timecode stops inside it, plays on past its end, or its Stop Note arrives. Usually empty; for DJ pull-ups.")
                 .font(.caption)
                 .foregroundColor(.secondary)
             Text("Drag to reorder. Arguments: 1 is an int, 0.5 a float, text a string; \"quote\" strings with spaces.")
