@@ -251,9 +251,6 @@ struct FireLogView: View {
                 .labelsHidden()
                 .fixedSize()
                 Spacer()
-                TextField("Search", text: $search, prompt: Text("Search"))
-                    .textFieldStyle(TrigFieldStyle())
-                    .frame(width: 260)
             }
             .padding(.horizontal, 32)
             .padding(.top, 16)
@@ -273,6 +270,7 @@ struct FireLogView: View {
                 }
             }
         }
+        .searchable(text: $search, placement: .toolbar, prompt: "Search the Fire Log")
     }
 
     private var header: some View {

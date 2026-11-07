@@ -942,11 +942,12 @@ final class ShowModel: ObservableObject {
         return .idle
     }
 
-    /// The Show screen's status bar line about the last firing, and whether any Action failed.
-    var lastFiringSummary: (text: String, failed: Bool)? {
+    /// The Show screen's status bar line about the last firing, and whether
+    /// any Action failed (nil: disarmed, nothing was sent).
+    var lastFiringSummary: (text: String, failed: Bool?)? {
         guard let firing = lastFiring, let name = song(firing.songID)?.name else { return nil }
         let total = firing.actionIDs.count
-        guard firing.sent else { return ("\(name) fired, disarmed, nothing sent", false) }
+        guard firing.sent else { return ("\(name) fired, disarmed, nothing sent", nil) }
         let failed = firing.actionIDs.filter { id in
             guard let result = sendResults[id], result.date >= firing.date else { return false }
             return !result.ok
