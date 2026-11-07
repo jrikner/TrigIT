@@ -40,6 +40,7 @@ final class ShowModel: ObservableObject {
     @Published private(set) var source: TimecodeSourceChoice = .simulator
     @Published private(set) var audioInputDevices: [AudioInputDevice] = []
     @Published private(set) var midiSources: [MIDISourceInfo] = []
+    @Published private(set) var midiOutputs: [MIDIOutputInfo] = []
     /// Whether timecode is arriving from the chosen source right now.
     @Published private(set) var isReceiving = false
     /// While locked the Set is read-only; arming and the Simulator still work.
@@ -58,6 +59,7 @@ final class ShowModel: ObservableObject {
     private let audioDevices = AudioDeviceList()
     private let ltcInput = LTCAudioInput()
     private let midiInput = MIDIInput()
+    private let midiOutput = MIDIOutput()
     private var midiParser = MIDIParser()
     private var mtcDecoder = MTCDecoder()
     private let artNetInput = ArtNetTimecodeInput()
@@ -80,6 +82,11 @@ final class ShowModel: ObservableObject {
         midiInput.onSourcesChanged = { [weak self] in self?.midiSourcesChanged() }
         midiInput.onBytes = { [weak self] bytes, time in self?.receiveMIDI(bytes, at: time) }
         midiSources = midiInput.sources()
+        midiOutput.onOutputsChanged = { [weak self] in
+            guard let self else { return }
+            self.midiOutputs = self.midiOutput.outputs()
+        }
+        midiOutputs = midiOutput.outputs()
         artNetInput.onPacket = { [weak self] packet, time in self?.receiveArtNet(packet, at: time) }
         if let status = midiInput.startError { record("MIDI is unavailable (error \(status))", isError: true) }
         startClock()
@@ -93,6 +100,7 @@ final class ShowModel: ObservableObject {
 
     func setArmed(_ armed: Bool) {
         apply(engine.setArmed(armed))
+        if !armed { midiOutput.releaseAllNotes() }
     }
 
     // MARK: Show Lock
@@ -183,9 +191,35 @@ final class ShowModel: ObservableObject {
         }
     }
 
-    func addOSCAction(to songID: SongID, list: ActionList) {
-        guard var song = song(songID), let destination = set.destinations.first else { return }
-        song[keyPath: list.keyPath].append(Action(destinationID: destination.id, message: .osc(OSCMessage(address: "/"))))
+    /// The kinds of Action the editor can add.
+    enum NewActionKind: CaseIterable {
+        case osc, midiNote, msc
+
+        var label: String {
+            switch self {
+            case .osc: return "OSC message"
+            case .midiNote: return "MIDI note"
+            case .msc: return "MIDI Show Control"
+            }
+        }
+
+        var message: Action.Message {
+            switch self {
+            case .osc: return .osc(OSCMessage(address: "/"))
+            case .midiNote: return .midiNote(MIDINote(channel: 0, note: 60))
+            case .msc: return .msc(MSCCommand(command: .go, cue: "1"))
+            }
+        }
+    }
+
+    func addAction(_ kind: NewActionKind, to songID: SongID, list: ActionList) {
+        guard var song = song(songID) else { return }
+        // Prefer a Destination that can carry it: one with a MIDI output for MIDI.
+        let destination = kind == .osc
+            ? set.destinations.first
+            : set.destinations.first { $0.midiOutput != nil } ?? set.destinations.first
+        guard let destination else { return }
+        song[keyPath: list.keyPath].append(Action(destinationID: destination.id, message: kind.message))
         update(song)
     }
 
@@ -475,19 +509,20 @@ final class ShowModel: ObservableObject {
     private func send(_ outgoing: OutgoingAction) {
         let songName = song(outgoing.songID)?.name ?? "?"
         let destination = outgoing.destination
+        let kind: String
+        switch outgoing.reason {
+        case .entering, .manualFire: kind = ""
+        case .ending, .manualStop: kind = " (Stop Action)"
+        }
+        let summary = "\(songName)\(kind) → \(destination.name): \(Self.describe(outgoing.action.message))"
+        let timecode = playhead
+
         switch outgoing.action.message {
         case .osc(let message):
-            let kind: String
-            switch outgoing.reason {
-            case .entering, .manualFire: kind = ""
-            case .ending, .manualStop: kind = " (Stop Action)"
-            }
-            let summary = "\(songName)\(kind) → \(destination.name): \(message)"
             guard message.hasValidAddress else {
                 record("\(summary) not sent: invalid OSC address", isError: true)
                 return
             }
-            let timecode = playhead
             sender.send(message.encoded(), to: destination) { [weak self] error in
                 if let error {
                     self?.record("\(summary) failed: \(error.localizedDescription)", timecode: timecode, isError: true)
@@ -495,6 +530,39 @@ final class ShowModel: ObservableObject {
                     self?.record(summary, timecode: timecode)
                 }
             }
+        case .midiNote(let note):
+            sendMIDI(summary, to: destination) { try midiOutput.play(note, on: $0) }
+        case .msc(let command):
+            guard command.isValid else {
+                record("\(summary) not sent: cue and list must be numbers like 5 or 12.5, and a list needs a cue", isError: true)
+                return
+            }
+            sendMIDI(summary, to: destination) { try midiOutput.send(command.encoded, to: $0) }
+        }
+    }
+
+    private func sendMIDI(_ summary: String, to destination: Destination, _ send: (MIDIPortReference) throws -> Void) {
+        guard let output = destination.midiOutput else {
+            record("\(summary) not sent: \(destination.name) has no MIDI output (Destinations tab)", isError: true)
+            return
+        }
+        do {
+            try send(output)
+            record(summary)
+        } catch {
+            record("\(summary) failed: \(error.localizedDescription)", isError: true)
+        }
+    }
+
+    /// How an Action's message reads in the log and the editor.
+    static func describe(_ message: Action.Message) -> String {
+        switch message {
+        case .osc(let osc):
+            return osc.description
+        case .midiNote(let note):
+            return "Note \(note.noteName) (\(note.note)) ch \(note.channel + 1) vel \(note.velocity)"
+        case .msc(let command):
+            return command.summary
         }
     }
 

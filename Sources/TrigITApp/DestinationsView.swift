@@ -19,6 +19,7 @@ struct DestinationsView: View {
                 Text("Address").frame(maxWidth: .infinity, alignment: .leading)
                 Text("Port").frame(width: 64, alignment: .leading)
                 Text("Network interface").frame(width: 170, alignment: .leading)
+                Text("MIDI output").frame(width: 170, alignment: .leading)
                 Spacer().frame(width: 24)
             }
             .font(.caption)
@@ -77,6 +78,23 @@ struct DestinationRow: View {
             }
             .labelsHidden()
             .frame(width: 170)
+
+            Picker("", selection: binding(\.midiOutput)) {
+                Text("None").tag(MIDIPortReference?.none)
+                ForEach(model.midiOutputs) { output in
+                    // Match by unique ID, so a renamed port still shows as chosen.
+                    let isChosen = destination.midiOutput?.uniqueID == output.uniqueID
+                    Text(output.name).tag(MIDIPortReference?.some(isChosen ? destination.midiOutput! : output.reference))
+                }
+                // Keep an unplugged output visible rather than silently clearing it.
+                if let chosen = destination.midiOutput,
+                   !model.midiOutputs.contains(where: { $0.uniqueID == chosen.uniqueID }) {
+                    Text("\(chosen.name) (not connected)").tag(MIDIPortReference?.some(chosen))
+                }
+            }
+            .labelsHidden()
+            .frame(width: 170)
+            .help("For MIDI note and MIDI Show Control Actions")
 
             Button(role: .destructive) {
                 model.deleteDestination(destination.id)
