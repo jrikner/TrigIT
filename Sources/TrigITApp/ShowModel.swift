@@ -118,7 +118,7 @@ final class ShowModel: ObservableObject {
     }
 
     var currentSong: Song? {
-        set.songs.first { $0.id == currentSongID }
+        self.set.songs.first { $0.id == currentSongID }
     }
 
     // MARK: Armed

@@ -10,7 +10,8 @@ struct TrigITApp: App {
         WindowGroup("TrigIT") {
             ContentView()
                 .environmentObject(model)
-                .frame(minWidth: 900, minHeight: 520)
+                // Fits the three panes' minimum widths (420 + 400 + 220) side by side.
+                .frame(minWidth: 1044, minHeight: 560)
         }
         .commands { SetCommands(model: model) }
     }
