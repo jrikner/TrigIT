@@ -11,13 +11,7 @@ struct ShowScreenView: View {
             VStack(alignment: .leading, spacing: 20) {
                 Spacer(minLength: 0)
                 sourceLine
-                Text(model.playhead?.description ?? "00:00:00:00")
-                    .font(TrigType.playhead)
-                    .tracking(-2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .foregroundColor(model.playhead != nil && (model.isReceiving || model.source == .simulator) ? .primary : .secondary)
-                    .accessibilityLabel("Playhead \(model.playhead?.description ?? "none")")
+                PlayheadText()
                 currentSong
                 progress
                 Spacer(minLength: 0)
@@ -85,6 +79,64 @@ struct ShowScreenView: View {
     }
 }
 
+/// The big Playhead. Green: rolling inside a Song. Orange: rolling between
+/// Songs. Flashing red: timecode stopped or was lost after rolling (no flash
+/// with Reduce Motion). Gray: no timecode yet.
+struct PlayheadText: View {
+    @EnvironmentObject private var model: ShowModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    private enum State { case inSong, betweenSongs, stopped, none }
+
+    private var state: State {
+        guard let playhead = model.playhead else { return .none }
+        guard model.isReceiving, model.alert == nil else { return .stopped }
+        return model.set.songs.contains { $0.contains(playhead) } ? .inSong : .betweenSongs
+    }
+
+    var body: some View {
+        let state = state
+        Text(model.playhead?.description ?? "00:00:00:00")
+            .font(TrigType.playhead)
+            .tracking(-2)
+            .lineLimit(1)
+            .minimumScaleFactor(0.3)
+            .foregroundColor(color(state))
+            .opacity(state == .stopped && dim ? 0.35 : 1)
+            .accessibilityLabel("Playhead \(model.playhead?.description ?? "none")")
+            .accessibilityValue(word(state))
+            .onChange(of: state == .stopped) { flash($0) }
+            .onAppear { flash(state == .stopped) }
+    }
+
+    private func flash(_ on: Bool) {
+        guard on, !reduceMotion else {
+            withAnimation(nil) { dim = false }
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { dim = true }
+    }
+
+    private func color(_ state: State) -> Color {
+        switch state {
+        case .inSong: return StateColor.ok
+        case .betweenSongs: return StateColor.caution
+        case .stopped: return StateColor.alert
+        case .none: return .secondary
+        }
+    }
+
+    private func word(_ state: State) -> String {
+        switch state {
+        case .inSong: return "Rolling in a Song"
+        case .betweenSongs: return "Rolling between Songs"
+        case .stopped: return "Stopped"
+        case .none: return "No timecode"
+        }
+    }
+}
+
 /// The Set, in order: fired Songs ticked, the current one highlighted.
 struct SetPanel: View {
     @EnvironmentObject private var model: ShowModel
@@ -112,7 +164,7 @@ struct SetPanel: View {
             }
             .padding(12)
             .padding(.top, 8)
-            .frame(maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 
@@ -136,7 +188,7 @@ struct SetPanel: View {
                 .foregroundColor(fired ? .secondary : .primary)
                 .lineLimit(1)
             Spacer()
-            Text(song.hasSpan ? String(song.start.description.prefix(8)) : "Start Note")
+            Text(song.hasSpan ? song.start.description : "Start Note")
                 .font(.system(size: 16).monospacedDigit())
                 .foregroundColor(.secondary)
         }
