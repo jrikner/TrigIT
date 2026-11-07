@@ -10,6 +10,22 @@ swift run TrigIT
 
 Or open `Package.swift` in Xcode and run the `TrigIT` scheme.
 
+## Running a show
+
+TrigIT starts Armed, with the last Set and the last Timecode Sources, so it can be relaunched mid-show and carry on. The first timecode it hears inside a Song counts as Entering: that Song's Start Actions go out once more, on purpose, to bring the devices back in sync. The Simulator never plays after a launch, and while Armed it only drives the show after you confirm it.
+
+Everything in the fire log is also written to a daily file in `~/Library/Logs/TrigIT/` (`2026-11-07.log`); files older than 30 days are removed.
+
+To have TrigIT relaunched within seconds if it crashes or is killed, build the app and install the launch agent:
+
+```sh
+scripts/build-app.sh                       # build/TrigIT.app, ad-hoc signed
+cp -R build/TrigIT.app /Applications/
+scripts/install-launch-agent.sh            # or: scripts/install-launch-agent.sh --uninstall
+```
+
+The agent also starts TrigIT at login. Quitting with ⌘Q leaves it quit. To sign and notarize for other Macs, see `docs/release.md`.
+
 ## Run the tests
 
 ```sh

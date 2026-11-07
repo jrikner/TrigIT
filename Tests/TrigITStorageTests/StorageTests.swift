@@ -203,3 +203,43 @@ func temporaryDirectory() throws -> URL {
     try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
 }
+
+final class ShowLogTests: XCTestCase {
+    var folder: URL!
+    var calendar = Calendar(identifier: .gregorian)
+
+    override func setUpWithError() throws {
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: folder)
+    }
+
+    func date(_ text: String) -> Date {
+        ISO8601DateFormatter().date(from: text)!
+    }
+
+    func testWritesOneFilePerDayWithTimestampedLines() throws {
+        let log = ShowLog(directory: folder, calendar: calendar)
+        try log.append("Armed", at: date("2026-11-07T21:00:00Z"))
+        try log.append("Fired Intro", at: date("2026-11-07T21:00:01Z"))
+        try log.append("Timecode stopped", at: date("2026-11-08T00:30:00Z"))
+        let first = try String(contentsOf: folder.appendingPathComponent("2026-11-07.log"), encoding: .utf8)
+        XCTAssertEqual(first, "21:00:00.000  Armed\n21:00:01.000  Fired Intro\n")
+        let second = try String(contentsOf: folder.appendingPathComponent("2026-11-08.log"), encoding: .utf8)
+        XCTAssertEqual(second, "00:30:00.000  Timecode stopped\n")
+    }
+
+    func testRemovesFilesOlderThan30Days() throws {
+        let log = ShowLog(directory: folder, calendar: calendar)
+        for day in ["2026-10-07", "2026-10-08", "2026-11-07"] {
+            try log.append("x", at: date("\(day)T12:00:00Z"))
+        }
+        try Data().write(to: folder.appendingPathComponent("notes.txt"))
+        log.removeOldFiles(now: date("2026-11-07T23:00:00Z"))
+        let left = try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted()
+        XCTAssertEqual(left, ["2026-10-08.log", "2026-11-07.log", "notes.txt"])
+    }
+}
