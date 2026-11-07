@@ -29,3 +29,10 @@ Pick "MTC: source" as the Timecode Source. Every Core MIDI source is listed: phy
 ## Art-Net Timecode input
 
 Pick "Art-Net Timecode: interface" as the Timecode Source. TrigIT listens on UDP port 6454 and shares it with other Art-Net software on the same Mac. Choosing an interface means packets arriving on any other interface are ignored.
+
+## Editing a Set
+
+- **Capture:** select a Song, play timecode to the right moment, and press "Set start" or "Set end".
+- **Overlaps:** every timecode position belongs to at most one Song. An edit that would overlap another Song is refused, and both Songs are highlighted.
+- **Import CSV:** one Song per row: name, start, end (hh:mm:ss:ff). Commas, semicolons or tabs, an optional header row, and quoted names all work. Invalid or overlapping rows are listed by line number and skipped.
+- **Show Lock:** the lock button in the top bar makes the Set read-only. Arming and the Simulator keep working.

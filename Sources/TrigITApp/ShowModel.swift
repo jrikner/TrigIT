@@ -42,6 +42,16 @@ final class ShowModel: ObservableObject {
     @Published private(set) var midiSources: [MIDISourceInfo] = []
     /// Whether timecode is arriving from the chosen source right now.
     @Published private(set) var isReceiving = false
+    /// While locked the Set is read-only; arming and the Simulator still work.
+    @Published private(set) var isShowLocked = false
+    /// The last Song edit refused because it would overlap other Songs.
+    @Published private(set) var refusedEdit: RefusedEdit?
+
+    struct RefusedEdit: Equatable {
+        let songID: SongID
+        let conflicts: [SongID]
+        let message: String
+    }
 
     private var engine: ShowEngine
     private let sender = UDPSender()
@@ -85,6 +95,21 @@ final class ShowModel: ObservableObject {
         apply(engine.setArmed(armed))
     }
 
+    // MARK: Show Lock
+
+    func setShowLocked(_ locked: Bool) {
+        guard locked != isShowLocked else { return }
+        isShowLocked = locked
+        record(locked ? "Show Lock on: the Set is read-only" : "Show Lock off")
+    }
+
+    /// Runs an edit to the Set unless Show Lock is on.
+    private func edit(_ change: (inout ShowSet) -> Void) {
+        guard !isShowLocked else { return }
+        change(&set)
+        engine.updateSet(set)
+    }
+
     // MARK: Songs
 
     func addSong() {
@@ -94,29 +119,63 @@ final class ShowModel: ObservableObject {
             start: start,
             end: Timecode(hours: start.hours, minutes: 5, seconds: 0, frames: 0)!
         )
-        set.songs.append(song)
-        engine.updateSet(set)
+        update(song)
     }
 
     func deleteSong(_ id: SongID) {
-        set.songs.removeAll { $0.id == id }
-        engine.updateSet(set)
+        edit { $0.songs.removeAll { $0.id == id } }
+        if refusedEdit?.songID == id { refusedEdit = nil }
     }
 
-    func update(_ song: Song) {
-        guard let index = set.songs.firstIndex(where: { $0.id == song.id }) else { return }
-        set.songs[index] = song
-        engine.updateSet(set)
+    /// Applies an edit to a Song (or adds it). Returns false, and records why
+    /// in `refusedEdit`, if it would overlap another Song or Show Lock is on.
+    @discardableResult
+    func update(_ song: Song) -> Bool {
+        guard !isShowLocked else { return false }
+        var conflicts: [Song] = []
+        edit { conflicts = $0.apply(song) }
+        if conflicts.isEmpty {
+            if refusedEdit?.songID == song.id { refusedEdit = nil }
+            return true
+        }
+        let names = conflicts.map { "\"\($0.name)\"" }.joined(separator: ", ")
+        refusedEdit = RefusedEdit(songID: song.id, conflicts: conflicts.map(\.id),
+                                  message: "\(song.name) would overlap \(names); not changed")
+        return false
     }
 
     func song(_ id: SongID) -> Song? {
         set.songs.first { $0.id == id }
     }
 
+    /// Sets a Song's start to the live Playhead.
+    func captureStart(for songID: SongID) {
+        guard let playhead, var song = song(songID) else { return }
+        song.start = playhead
+        update(song)
+    }
+
+    /// Sets a Song's end to the live Playhead.
+    func captureEnd(for songID: SongID) {
+        guard let playhead, var song = song(songID) else { return }
+        song.end = playhead
+        update(song)
+    }
+
+    /// Adds Songs from CSV text and reports what happened in the log.
+    func importSongs(csv text: String, fileName: String) -> SongImportReport? {
+        guard !isShowLocked else { return nil }
+        var report = SongImportReport()
+        edit { report = $0.importSongs(csv: text) }
+        record("Imported \(report.imported.count) Song(s) from \(fileName); skipped \(report.problems.count) row(s)",
+               isError: !report.problems.isEmpty)
+        return report
+    }
+
     // MARK: Start Actions
 
     func addOSCAction(to songID: SongID) {
-        guard var song = song(songID), let destination = set.destinations.first else { return }
+        guard !isShowLocked, var song = song(songID), let destination = set.destinations.first else { return }
         song.startActions.append(Action(destinationID: destination.id, message: .osc(OSCMessage(address: "/"))))
         update(song)
     }
@@ -142,23 +201,26 @@ final class ShowModel: ObservableObject {
     // MARK: Destinations
 
     func addDestination() {
-        set.destinations.append(Destination(
-            name: "Destination \(set.destinations.count + 1)", host: "127.0.0.1", port: 7000
-        ))
-        engine.updateSet(set)
+        edit { set in
+            set.destinations.append(Destination(
+                name: "Destination \(set.destinations.count + 1)", host: "127.0.0.1", port: 7000
+            ))
+        }
     }
 
     func update(_ destination: Destination) {
-        guard let index = set.destinations.firstIndex(where: { $0.id == destination.id }) else { return }
-        set.destinations[index] = destination
-        engine.updateSet(set)
+        edit { set in
+            guard let index = set.destinations.firstIndex(where: { $0.id == destination.id }) else { return }
+            set.destinations[index] = destination
+        }
     }
 
     /// Destinations used by any Action can't be deleted.
     func deleteDestination(_ id: DestinationID) {
-        guard !set.isInUse(id) else { return }
-        set.destinations.removeAll { $0.id == id }
-        engine.updateSet(set)
+        edit { set in
+            guard !set.isInUse(id) else { return }
+            set.destinations.removeAll { $0.id == id }
+        }
     }
 
     func destinationName(_ id: DestinationID) -> String {
