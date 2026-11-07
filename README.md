@@ -16,4 +16,4 @@ Or open `Package.swift` in Xcode and run the `TrigIT` scheme.
 swift test
 ```
 
-The Show Engine (`Sources/TrigITEngine`) is pure Swift with no platform dependencies, so its tests also run on Linux. The SwiftUI app (`Sources/TrigITApp`) only builds on macOS.
+The Show Engine (`Sources/TrigITEngine`) and the protocol codecs (`Sources/TrigITProtocols`) are pure Swift with no platform dependencies, so their tests also run on Linux. The SwiftUI app (`Sources/TrigITApp`) only builds on macOS.

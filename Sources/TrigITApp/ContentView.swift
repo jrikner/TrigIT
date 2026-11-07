@@ -2,17 +2,64 @@ import SwiftUI
 import TrigITEngine
 
 struct ContentView: View {
+    @SceneStorage("showFireLog") private var showFireLog = true
+
     var body: some View {
-        HSplitView {
-            SetEditorView()
-                .frame(minWidth: 400, idealWidth: 440)
-            VStack(spacing: 0) {
-                ShowScreenView()
-                Divider()
-                SimulatorControlsView()
+        VStack(spacing: 0) {
+            TopBarView(showFireLog: $showFireLog)
+            Divider()
+            HSplitView {
+                TabView {
+                    SetEditorView()
+                        .tabItem { Text("Songs") }
+                    DestinationsView()
+                        .tabItem { Text("Destinations") }
+                }
+                .padding(8)
+                .frame(minWidth: 460, idealWidth: 520)
+
+                VStack(spacing: 0) {
+                    ShowScreenView()
+                    Divider()
+                    SimulatorControlsView()
+                }
+                .frame(minWidth: 460)
+
+                if showFireLog {
+                    FireLogView()
+                        .frame(minWidth: 260, idealWidth: 320)
+                }
             }
-            .frame(minWidth: 460)
         }
+    }
+}
+
+// MARK: - Top bar
+
+struct TopBarView: View {
+    @EnvironmentObject private var model: ShowModel
+    @Binding var showFireLog: Bool
+
+    var body: some View {
+        HStack {
+            Button {
+                model.setArmed(!model.isArmed)
+            } label: {
+                Text(model.isArmed ? "ARMED" : "DISARMED")
+                    .font(.system(size: 18, weight: .heavy))
+                    .frame(width: 160, height: 34)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(model.isArmed ? Color.red : Color.gray.opacity(0.35)))
+                    .foregroundColor(.white)
+            }
+            .buttonStyle(.plain)
+            .help(model.isArmed ? "Click to disarm: timecode is still followed, nothing is sent"
+                                : "Click to arm: Songs send their Actions when entered")
+            Spacer()
+            Toggle("Fire log", isOn: $showFireLog)
+                .toggleStyle(.button)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 }
 
@@ -49,17 +96,7 @@ struct ShowScreenView: View {
                     .font(.system(size: 32, weight: .semibold))
                     .foregroundColor(model.currentSong == nil ? .secondary : .primary)
             }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Would fire (nothing is sent yet)").font(.caption).foregroundColor(.secondary)
-                List(model.firings) { firing in
-                    HStack {
-                        Text(firing.timecode.description).font(.system(.body, design: .monospaced))
-                        Text(firing.songName)
-                    }
-                }
-                .frame(minHeight: 80)
-            }
+            Spacer(minLength: 0)
         }
         .padding(20)
     }
@@ -105,82 +142,34 @@ struct SimulatorControlsView: View {
     }
 }
 
-// MARK: - Set editor
+// MARK: - Fire log
 
-struct SetEditorView: View {
+struct FireLogView: View {
     @EnvironmentObject private var model: ShowModel
-    @State private var selection: SongID?
+
+    private static let timeFormat: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        return formatter
+    }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(model.set.name).font(.headline)
-                Spacer()
-                Button("Add Song") { model.addSong() }
-                Button("Delete") {
-                    if let selection { model.deleteSong(selection) }
-                    selection = nil
-                }
-                .disabled(selection == nil)
-            }
-            HStack {
-                Text("Name").frame(maxWidth: .infinity, alignment: .leading)
-                Text("Start").frame(width: 110, alignment: .leading)
-                Text("End").frame(width: 110, alignment: .leading)
-            }
-            .font(.caption)
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 8)
-
-            List(selection: $selection) {
-                ForEach(model.set.songs) { song in
-                    SongRow(song: song, isCurrent: song.id == model.currentSongID)
-                        .tag(song.id)
-                }
-            }
-        }
-        .padding(16)
-    }
-}
-
-struct SongRow: View {
-    @EnvironmentObject private var model: ShowModel
-    let song: Song
-    let isCurrent: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Circle()
-                    .fill(isCurrent ? Color.green : Color.clear)
-                    .frame(width: 8, height: 8)
-                TextField("Name", text: Binding(
-                    get: { song.name },
-                    set: { name in
-                        var edited = song
-                        edited.name = name
-                        model.update(edited)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Fire log").font(.headline).padding([.top, .horizontal], 12)
+            List(model.log) { entry in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(Self.timeFormat.string(from: entry.date))
+                        Text(entry.timecode?.description ?? "")
                     }
-                ))
-                TimecodeField(value: song.start) { start in
-                    var edited = song
-                    edited.start = start
-                    model.update(edited)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    Text(entry.text)
+                        .foregroundColor(entry.isError ? .red : .primary)
+                        .textSelection(.enabled)
                 }
-                TimecodeField(value: song.end) { end in
-                    var edited = song
-                    edited.end = end
-                    model.update(edited)
-                }
-            }
-            if song.end < song.start {
-                Text("End is before start: this Song never fires")
-                    .font(.caption)
-                    .foregroundColor(.red)
             }
         }
-        .padding(.vertical, 2)
-        .fontWeight(isCurrent ? .bold : .regular)
     }
 }
 

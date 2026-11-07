@@ -123,13 +123,21 @@ final class Timeline {
     private var now = 1_000.0
     private var position: Timecode?
 
-    init(set: ShowSet, rate: FrameRate = .fps25) {
-        self.engine = ShowEngine(set: set)
+    init(set: ShowSet, rate: FrameRate = .fps25, armed: Bool = false) {
+        self.engine = ShowEngine(set: set, armed: armed)
         self.rate = rate
     }
 
     var fired: [SongID] {
         events.compactMap { if case .fired(let id) = $0 { return id } else { return nil } }
+    }
+
+    var sends: [OutgoingAction] {
+        events.compactMap { if case .send(let send) = $0 { return send } else { return nil } }
+    }
+
+    func setArmed(_ armed: Bool) {
+        events += engine.setArmed(armed)
     }
 
     var jumpCount: Int {
