@@ -104,12 +104,14 @@ struct SourceColumn: View {
                 if choice != nil {
                     RowDivider()
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(reading?.description ?? "--:--:--:--")
-                            .font(TrigType.readout)
-                            .foregroundColor(role == .backup ? .secondary : .primary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                        LevelMeter(level: level)
+                        TimelineView(.periodic(from: .now, by: 1.0 / 30)) { _ in
+                            Text(reading?.description ?? "00:00:00:00")
+                                .font(TrigType.readout)
+                                .foregroundColor(role == .backup || reading == nil ? .secondary : .primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.5)
+                        }
+                        if choice != .simulator { LevelMeter(level: level) }
                         Text(footnote).font(TrigType.secondary).foregroundColor(.secondary)
                     }
                     .padding(.vertical, 14)
@@ -250,7 +252,7 @@ struct FireLogView: View {
                 .fixedSize()
                 Spacer()
                 TextField("Search", text: $search, prompt: Text("Search"))
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(TrigFieldStyle())
                     .frame(width: 260)
             }
             .padding(.horizontal, 32)

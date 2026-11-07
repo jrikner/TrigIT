@@ -10,7 +10,7 @@ struct WelcomeView: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 0)
-                Image(nsImage: NSApp.applicationIconImage)
+                Image(nsImage: AppIcon.image)
                     .resizable()
                     .frame(width: 140, height: 140)
                     .accessibilityHidden(true)
@@ -117,7 +117,7 @@ struct OpeningView: View {
 
     var body: some View {
         VStack(spacing: 28) {
-            Image(nsImage: NSApp.applicationIconImage)
+            Image(nsImage: AppIcon.image)
                 .resizable()
                 .frame(width: 104, height: 104)
                 .accessibilityHidden(true)
@@ -267,12 +267,12 @@ struct NewSetSetupView: View {
                 GroupHeader(preset.rawValue)
                 GroupedBox {
                     FormRow(label: "Address") {
-                        TextField("IP address", text: $host).textFieldStyle(.roundedBorder)
+                        TextField("IP address", text: $host).textFieldStyle(TrigFieldStyle())
                             .font(TrigType.body.monospacedDigit()).frame(width: 220)
                     }
                     RowDivider()
                     FormRow(label: "OSC port") {
-                        TextField("Port", text: $port).textFieldStyle(.roundedBorder)
+                        TextField("Port", text: $port).textFieldStyle(TrigFieldStyle())
                             .font(TrigType.body.monospacedDigit()).frame(width: 220)
                             .foregroundColor(UInt16(port).map { $0 > 0 } == true ? .primary : StateColor.alert)
                     }

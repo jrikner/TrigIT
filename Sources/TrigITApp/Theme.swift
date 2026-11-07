@@ -56,6 +56,33 @@ enum EditSection: String, CaseIterable, Identifiable {
     }
 }
 
+/// The app icon, for the welcome and opening screens and the Dock.
+enum AppIcon {
+    static let image: NSImage = {
+        // In the app bundle: the icon actool compiled from Resources/AppIcon.icon.
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"), let image = NSImage(contentsOf: url) {
+            return image
+        }
+        // Run with `swift run`: there is no bundle, so use the PNG exported from it.
+        let png = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../Resources/AppIcon.png").standardizedFileURL
+        return NSImage(contentsOf: png) ?? NSApp.applicationIconImage
+    }()
+}
+
+/// Text fields that grow with their font, so large timecode is never clipped
+/// (the system rounded-border field keeps a fixed height).
+struct TrigFieldStyle: TextFieldStyle {
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.07)))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+    }
+}
+
 /// A small filled circle in a state colour, always next to a word.
 struct StateDot: View {
     let color: Color
@@ -153,19 +180,29 @@ struct Footnote: View {
 
 extension View {
     /// The standard large capsule button.
-    func capsuleButton() -> some View {
-        buttonStyle(.bordered).controlSize(.large).capsuleShape().font(TrigType.body)
-    }
+    func capsuleButton() -> some View { buttonStyle(CapsuleButtonStyle(prominent: false)) }
 
     /// The default action button (Restore, Continue).
-    func prominentCapsuleButton() -> some View {
-        buttonStyle(.borderedProminent).controlSize(.large).capsuleShape().font(TrigType.body)
-    }
+    func prominentCapsuleButton() -> some View { buttonStyle(CapsuleButtonStyle(prominent: true)) }
+}
 
-    /// Capsule buttons on macOS 14 and later; macOS 13 keeps its rounded rectangle.
-    @ViewBuilder
-    func capsuleShape() -> some View {
-        if #available(macOS 14.0, *) { buttonBorderShape(.capsule) } else { self }
+/// A 17 pt capsule button, sized for the show (system bordered buttons stay small).
+struct CapsuleButtonStyle: ButtonStyle {
+    let prominent: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(TrigType.body)
+            .lineLimit(1)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 16)
+            .foregroundColor(prominent ? .black : .primary)
+            .background(Capsule().fill(prominent
+                ? Color.white.opacity(configuration.isPressed ? 0.7 : 0.88)
+                : Color.white.opacity(configuration.isPressed ? 0.22 : 0.12)))
+            .opacity(isEnabled ? 1 : 0.4)
+            .contentShape(Capsule())
     }
 }
 

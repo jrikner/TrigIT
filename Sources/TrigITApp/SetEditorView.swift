@@ -558,18 +558,18 @@ struct NoteTriggerField: View {
         HStack(spacing: 4) {
             Text("Channel").foregroundColor(.secondary)
             TextField("Ch", text: binding(isChannel: true), prompt: Text("ch"))
-                .frame(width: 44)
+                .frame(width: 60)
                 .accessibilityLabel("\(label) MIDI channel, 1 to 16")
             Text("Note").foregroundColor(.secondary)
             TextField("Note", text: binding(isChannel: false), prompt: Text("note"))
-                .frame(width: 54)
+                .frame(width: 70)
                 .accessibilityLabel("\(label) note number, 0 to 127")
             Text(value.map { MIDINote(channel: $0.channel, note: $0.note).noteName } ?? "None")
                 .foregroundColor(.secondary)
                 .frame(width: 48, alignment: .leading)
         }
         .labelsHidden()
-        .textFieldStyle(.roundedBorder)
+        .textFieldStyle(TrigFieldStyle())
         .font(TrigType.body.monospacedDigit())
         .foregroundColor(parsed == nil || refused ? StateColor.alert : .primary)
         .onChange(of: value) { newValue in
@@ -734,7 +734,7 @@ struct MIDINoteFields: View {
         NumberField("MIDI note", value: Int(note.note), range: 0...127, width: 44) {
             onChange(MIDINote(channel: note.channel, note: UInt8($0), velocity: note.velocity))
         }
-        Text(note.noteName).font(.system(.body, design: .monospaced)).frame(width: 40, alignment: .leading)
+        Text(note.noteName).font(.system(.body, design: .monospaced)).frame(width: 48, alignment: .leading)
         Text("Ch").foregroundColor(.secondary)
         NumberField("MIDI channel", value: Int(note.channel) + 1, range: 1...16, width: 36) {
             onChange(MIDINote(channel: UInt8($0 - 1), note: note.note, velocity: note.velocity))
@@ -763,7 +763,7 @@ struct MSCFields: View {
             ForEach(MSCCommand.Command.allCases, id: \.self) { Text($0.name).tag($0) }
         }
         .labelsHidden()
-        .frame(width: 90)
+        .frame(width: 120)
         Text("Cue").foregroundColor(.secondary)
         TextField("MSC cue", text: Binding(
             get: { command.cue },
@@ -774,7 +774,7 @@ struct MSCFields: View {
             }
         ), prompt: Text("next"))
         .labelsHidden()
-        .frame(width: 56)
+        .frame(width: 76)
         Text("List").foregroundColor(.secondary)
         TextField("MSC list", text: Binding(
             get: { command.list },
@@ -785,7 +785,7 @@ struct MSCFields: View {
             }
         ), prompt: Text("default"))
         .labelsHidden()
-        .frame(width: 56)
+        .frame(width: 76)
         Text("Device").foregroundColor(.secondary)
         NumberField("MSC device ID", value: Int(command.deviceID), range: 0...127, width: 40) { id in
             var edited = command
@@ -860,7 +860,7 @@ struct NumberField: View {
         .labelsHidden()
         .font(.system(.body, design: .monospaced))
         .foregroundColor(parsed == nil ? .red : .primary)
-        .frame(width: width)
+        .frame(width: width + 24)
         .onChange(of: value) { text = String($0) }
     }
 }

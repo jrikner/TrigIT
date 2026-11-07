@@ -15,9 +15,10 @@ BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/TrigIT
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/TrigIT"
-# The Icon Composer icon: Assets.car for macOS 26 (Liquid Glass) and AppIcon.icns for older macOS.
-xcrun actool Resources/AppIcon.icon --compile "$APP/Contents/Resources" \
-    --platform macosx --minimum-deployment-target 13.0 --app-icon AppIcon \
+# The Icon Composer icon (Assets.car for macOS 26, AppIcon.icns for older macOS)
+# and the neutral accent colour.
+xcrun actool Resources/AppIcon.icon Resources/Assets.xcassets --compile "$APP/Contents/Resources" \
+    --platform macosx --minimum-deployment-target 13.0 --app-icon AppIcon --accent-color AccentColor \
     --output-partial-info-plist build/icon-partial.plist >/dev/null
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -31,6 +32,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleIconName</key><string>AppIcon</string>
+    <key>NSAccentColorName</key><string>AccentColor</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleVersion</key><string>$VERSION</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>

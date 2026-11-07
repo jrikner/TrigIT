@@ -19,8 +19,8 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
-        // A neutral accent, so selection never reads as a state colour.
-        .tint(Color(nsColor: .systemGray))
+        .controlSize(.large)
+        .textFieldStyle(TrigFieldStyle())
         .sheet(isPresented: $model.showingVersions) { PreviousVersionsView() }
         .sheet(isPresented: $model.showingNewSetSetup) { NewSetSetupView() }
     }
@@ -360,7 +360,7 @@ struct TimecodeField: View {
             }
         ), prompt: Text("hh:mm:ss:ff"))
         .labelsHidden()
-        .textFieldStyle(.roundedBorder)
+        .textFieldStyle(TrigFieldStyle())
         .font(font)
         .foregroundColor(Timecode(text) == nil || refused ? StateColor.alert : .primary)
         .frame(width: width)
