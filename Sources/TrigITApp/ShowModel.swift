@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI // for MutableCollection.move(fromOffsets:toOffset:)
 import TrigITEngine
 import TrigITProtocols
+import TrigITStorage
 
 /// The Timecode Source the show follows.
 enum TimecodeSourceChoice: Hashable {
@@ -51,6 +52,22 @@ final class ShowModel: ObservableObject {
     /// The last Song edit refused because it would overlap other Songs.
     @Published private(set) var refusedEdit: RefusedEdit?
 
+    // Set file (see SetDocument.swift).
+    /// Where the Set is saved; nil when it couldn't be opened and isn't saved anywhere yet.
+    @Published var documentURL: URL?
+    /// Why the Set couldn't be opened or saved, shown until resolved.
+    @Published var documentProblem: String?
+    @Published var recentDocuments: [URL] = []
+    @Published var showingVersions = false
+    @Published var canUndo = false
+    @Published var canRedo = false
+    var history = EditHistory<ShowSet>()
+    /// The model of the running app, for the app delegate.
+    static weak var current: ShowModel?
+    var pendingSave: DispatchWorkItem?
+    var lastVersionSaved: Date?
+    let versionStore = SetVersionStore(directory: ShowModel.applicationSupport.appendingPathComponent("Versions", isDirectory: true))
+
     struct RefusedEdit: Equatable {
         let songID: SongID
         let conflicts: [SongID]
@@ -76,7 +93,8 @@ final class ShowModel: ObservableObject {
 
     private static let maxLogEntries = 500
 
-    init(set: ShowSet = ShowModel.exampleSet) {
+    init() {
+        let set = ShowSet()
         self.set = set
         self.engine = ShowEngine(set: set, armed: false)
         sender.onInterfacesChanged = { [weak self] interfaces in self?.networkInterfacesChanged(interfaces) }
@@ -95,6 +113,7 @@ final class ShowModel: ObservableObject {
         dmxStreamer.update(for: set)
         artNetInput.onPacket = { [weak self] packet, time in self?.receiveArtNet(packet, at: time) }
         if let status = midiInput.startError { record("MIDI is unavailable (error \(status))", isError: true) }
+        openLastDocument()
         startClock()
     }
 
@@ -117,11 +136,36 @@ final class ShowModel: ObservableObject {
         record(locked ? "Show Lock on: the Set is read-only" : "Show Lock off")
     }
 
-    /// Runs an edit to the Set unless Show Lock is on.
+    /// Runs an edit to the Set unless Show Lock is on; records it for undo
+    /// and saves it.
     private func edit(_ change: (inout ShowSet) -> Void) {
         guard !isShowLocked else { return }
+        let before = set
         change(&set)
+        guard set != before else { return }
+        history.record(before: before, at: now)
+        setDidChange()
+    }
+
+    /// After any change to the Set: the engine follows it and it is saved.
+    func setDidChange() {
         engine.updateSet(set)
+        canUndo = history.canUndo
+        canRedo = history.canRedo
+        scheduleSave()
+    }
+
+    /// Replaces the whole Set (opening, restoring, undo) without recording an edit.
+    func replaceSet(_ newSet: ShowSet) {
+        set = newSet
+        refusedEdit = nil
+        engine.updateSet(newSet)
+        canUndo = history.canUndo
+        canRedo = history.canRedo
+    }
+
+    func record(_ text: String, isError: Bool = false) {
+        record(text, timecode: nil, isError: isError)
     }
 
     // MARK: Songs
@@ -447,7 +491,7 @@ final class ShowModel: ObservableObject {
 
     // MARK: Clock
 
-    private var now: Double { ProcessInfo.processInfo.systemUptime }
+    var now: Double { ProcessInfo.processInfo.systemUptime }
 
     private func startClock() {
         // 100 Hz polling resolves every frame at up to 30 fps.
@@ -590,7 +634,7 @@ final class ShowModel: ObservableObject {
         }
     }
 
-    private func record(_ text: String, timecode: Timecode?? = nil, isError: Bool = false) {
+    private func record(_ text: String, timecode: Timecode??, isError: Bool = false) {
         log.insert(LogEntry(timecode: timecode ?? playhead, text: text, isError: isError), at: 0)
         if log.count > Self.maxLogEntries { log.removeLast() }
     }
@@ -600,7 +644,7 @@ final class ShowModel: ObservableObject {
         return Timecode(hours: min(lastHour + 1, 23), minutes: 0, seconds: 0, frames: 0)!
     }
 
-    /// A small Set to try things with straight away (Sets are not saved yet).
+    /// The Set created on first launch, to try things with straight away.
     static let exampleSet: ShowSet = {
         let resolume = Destination(name: "Resolume", host: "127.0.0.1", port: 7000)
         return ShowSet(

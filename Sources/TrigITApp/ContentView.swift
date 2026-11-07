@@ -1,12 +1,23 @@
 import SwiftUI
 import TrigITEngine
+import TrigITStorage
 
 struct ContentView: View {
+    @EnvironmentObject private var model: ShowModel
     @SceneStorage("showFireLog") private var showFireLog = true
 
     var body: some View {
         VStack(spacing: 0) {
             TopBarView(showFireLog: $showFireLog)
+            if let problem = model.documentProblem {
+                Text(problem)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(Color.red.opacity(0.85))
+                    .foregroundColor(.white)
+                    .textSelection(.enabled)
+            }
             Divider()
             HSplitView {
                 TabView {
@@ -31,6 +42,50 @@ struct ContentView: View {
                 }
             }
         }
+        .navigationTitle(model.windowTitle)
+        .sheet(isPresented: $model.showingVersions) {
+            PreviousVersionsView()
+        }
+    }
+}
+
+/// The Set's automatically kept earlier versions, newest first.
+struct PreviousVersionsView: View {
+    @EnvironmentObject private var model: ShowModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Previous versions of \(model.set.name)").font(.headline)
+            Text("TrigIT keeps a version when a Set is opened and every two minutes while it is edited (the last 100). Restoring keeps the current Set as a version first, and can be undone.")
+                .font(.callout)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            let versions = model.previousVersions
+            if versions.isEmpty {
+                Text("No previous versions yet.").foregroundColor(.secondary)
+            } else {
+                List(versions, id: \.url) { version in
+                    HStack {
+                        Text(version.date.formatted(date: .abbreviated, time: .standard))
+                            .font(.system(.body, design: .monospaced))
+                        Spacer()
+                        Button("Restore") {
+                            model.restore(version)
+                            dismiss()
+                        }
+                        .disabled(model.isShowLocked)
+                    }
+                }
+                .frame(minHeight: 240)
+            }
+            HStack {
+                Spacer()
+                Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 460)
     }
 }
 

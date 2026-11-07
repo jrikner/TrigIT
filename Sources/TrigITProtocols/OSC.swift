@@ -1,5 +1,5 @@
 /// One OSC argument. TrigIT sends the three core OSC 1.0 types.
-public enum OSCArgument: Hashable, Sendable, Codable, CustomStringConvertible {
+public enum OSCArgument: Hashable, Sendable, CustomStringConvertible {
     case int(Int32)
     case float(Float)
     case string(String)
@@ -24,6 +24,36 @@ public enum OSCArgument: Hashable, Sendable, Codable, CustomStringConvertible {
             let needsQuotes = value.isEmpty || value.contains(where: \.isWhitespace) || value.contains("\"")
                 || Int32(value) != nil || Float(value) != nil
             return needsQuotes ? "\"" + value.replacingAll("\"", with: "\\\"") + "\"" : value
+        }
+    }
+}
+
+extension OSCArgument: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case int, float, string
+    }
+
+    /// Written as `{"int": 1}`, `{"float": 0.5}` or `{"string": "go"}`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let value = try c.decodeIfPresent(Int32.self, forKey: .int) {
+            self = .int(value)
+        } else if let value = try c.decodeIfPresent(Float.self, forKey: .float) {
+            self = .float(value)
+        } else if let value = try c.decodeIfPresent(String.self, forKey: .string) {
+            self = .string(value)
+        } else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "an OSC argument needs \"int\", \"float\" or \"string\""))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .int(let value): try c.encode(value, forKey: .int)
+        case .float(let value): try c.encode(value, forKey: .float)
+        case .string(let value): try c.encode(value, forKey: .string)
         }
     }
 }

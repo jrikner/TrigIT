@@ -1,7 +1,7 @@
 import TrigITProtocols
 
 /// A stable random identifier for an entity of type `Tag`.
-public struct EntityID<Tag>: Hashable, Sendable, Codable, CustomStringConvertible {
+public struct EntityID<Tag>: Hashable, Sendable, CustomStringConvertible {
     public let rawValue: UInt64
 
     public init(rawValue: UInt64) { self.rawValue = rawValue }
@@ -18,11 +18,12 @@ public struct EntityID<Tag>: Hashable, Sendable, Codable, CustomStringConvertibl
 public typealias SongID = EntityID<Song>
 public typealias DestinationID = EntityID<Destination>
 public typealias ActionID = EntityID<Action>
+public typealias SetID = EntityID<ShowSet>
 
 /// One piece of music in the Set: a span of timecode from `start` to `end`,
 /// both inclusive, and the Actions it sends. Timecode between Songs belongs to
 /// no Song.
-public struct Song: Identifiable, Hashable, Sendable, Codable {
+public struct Song: Identifiable, Hashable, Sendable {
     public var id: SongID
     public var name: String
     public var start: Timecode
@@ -51,7 +52,7 @@ public struct Song: Identifiable, Hashable, Sendable, Codable {
 
 /// A named device that Actions are sent to. It has a network address for
 /// OSC and, optionally, a MIDI output for MIDI Actions; a grandMA3 may use both.
-public struct Destination: Identifiable, Hashable, Sendable, Codable {
+public struct Destination: Identifiable, Hashable, Sendable {
     public var id: DestinationID
     public var name: String
     /// IP address or host name.
@@ -79,7 +80,7 @@ public struct Destination: Identifiable, Hashable, Sendable, Codable {
 }
 
 /// The DMX-over-network protocol a Destination receives pulses with.
-public enum DMXOutput: Hashable, Sendable, Codable, CaseIterable {
+public enum DMXOutput: String, Hashable, Sendable, Codable, CaseIterable {
     /// Art-Net to `host`: a node's own address, or a broadcast address such as 2.255.255.255.
     case artNet
     /// sACN to each universe's multicast group (239.255.x.y).
@@ -114,8 +115,8 @@ public struct MIDIPortReference: Hashable, Sendable, Codable {
 }
 
 /// One outgoing message a Song sends to one Destination.
-public struct Action: Identifiable, Hashable, Sendable, Codable {
-    public enum Message: Hashable, Sendable, Codable {
+public struct Action: Identifiable, Hashable, Sendable {
+    public enum Message: Hashable, Sendable {
         /// Sent over UDP to the Destination's address.
         case osc(OSCMessage)
         /// Note On, then Note Off, to the Destination's MIDI output.
@@ -148,7 +149,10 @@ public struct Action: Identifiable, Hashable, Sendable, Codable {
 /// The show: an ordered list of Songs and the Destinations they send to.
 /// Called `ShowSet` in code because `Set` is taken by the Swift standard
 /// library; everywhere else it is the "Set".
-public struct ShowSet: Hashable, Sendable, Codable {
+public struct ShowSet: Hashable, Sendable {
+    /// Stays the same when the file is renamed, moved or copied, so the Set's
+    /// previous versions follow it.
+    public var id: SetID
     public var name: String
     public var songs: [Song]
     public var destinations: [Destination]
@@ -161,8 +165,9 @@ public struct ShowSet: Hashable, Sendable, Codable {
     public static let defaultStopTime = 2.0
     public static let stopTimeRange = 0.5...30.0
 
-    public init(name: String = "Untitled Set", songs: [Song] = [], destinations: [Destination] = [],
+    public init(id: SetID = SetID(), name: String = "Untitled Set", songs: [Song] = [], destinations: [Destination] = [],
                 stopTime: Double = ShowSet.defaultStopTime) {
+        self.id = id
         self.name = name
         self.songs = songs
         self.destinations = destinations

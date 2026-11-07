@@ -51,3 +51,7 @@ Give a Destination a MIDI output (Destinations tab): a physical port, a network 
 ## Art-Net and sACN pulses
 
 Give a Destination a DMX output (Destinations tab): Art-Net to its address (a node, or a broadcast address such as 2.255.255.255), sACN multicast, or sACN unicast to its address, through its chosen network interface. Pulse Actions set one channel (default 255) for a time (default 0.5 s), then 0. Every universe a pulse Action uses is streamed 30 times a second from launch until quit, with zeros at rest, so receivers such as the grandMA3's DMX remote inputs never see the source disappear.
+
+## Set files
+
+A Set is one readable JSON file (`.trigit`), saved automatically a moment after every change and on quit; there is no Save command. TrigIT reopens the last Set at launch (the first launch creates an example in Documents/TrigIT). File → New Set, Open Set, Open Recent, Save As, Show in Finder. Edit → Undo/Redo covers every change to the Set. File → Previous Versions lists versions kept when the Set was opened and every two minutes of editing (the last 100, in Application Support/TrigIT/Versions) and restores any of them. A file that can't be opened is never overwritten: TrigIT says why and starts an unsaved empty Set.
