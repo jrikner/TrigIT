@@ -46,6 +46,8 @@ struct ContentView: View {
         }
         .background(modeShortcuts)
         .toolbar { toolbar }
+        .onChange(of: model.isShowLocked) { if $0 { mode = .show } }
+        .onAppear { if model.isShowLocked { mode = .show } }
         .navigationTitle(mode == .show ? model.setTitle : section.rawValue)
         .navigationSubtitle(mode == .show ? "" : model.setTitle)
     }
@@ -53,7 +55,8 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            Picker("Mode", selection: $mode) {
+            // Show Lock keeps TrigIT in Show mode: Edit is off until the lock is off.
+            Picker("Mode", selection: Binding(get: { mode }, set: { if $0 == .show || !model.isShowLocked { mode = $0 } })) {
                 Text("Show").tag(AppMode.show)
                 Text("Edit").tag(AppMode.edit)
             }
@@ -61,7 +64,7 @@ struct ContentView: View {
             .labelsHidden()
             .controlSize(.large)
             .frame(width: 180)
-            .help("Show (⌘1) or Edit (⌘2)")
+            .help(model.isShowLocked ? "Turn off Show Lock to edit" : "Show (⌘1) or Edit (⌘2)")
         }
         ToolbarItemGroup(placement: .primaryAction) {
             if mode == .show {
@@ -79,7 +82,7 @@ struct ContentView: View {
     private var modeShortcuts: some View {
         ZStack {
             Button("Show") { mode = .show }.keyboardShortcut("1")
-            Button("Edit") { mode = .edit }.keyboardShortcut("2")
+            Button("Edit") { mode = .edit }.keyboardShortcut("2").disabled(model.isShowLocked)
         }
         .opacity(0)
         .frame(width: 0, height: 0)
