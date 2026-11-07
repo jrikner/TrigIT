@@ -106,7 +106,7 @@ final class ShowEngineTests: XCTestCase {
         for step in 0...100 {
             let now = 100 + Double(step) * 0.02
             if let reading = simulator.reading(at: now) {
-                fired += engine.handle(reading).compactMap { if case .fired(let id) = $0 { return id } else { return nil } }
+                fired += engine.handle(reading).compactMap { if case .fired(let id, _) = $0 { return id } else { return nil } }
             }
         }
         XCTAssertEqual(fired, [intro.id])
@@ -129,8 +129,33 @@ final class Timeline {
     }
 
     var fired: [SongID] {
-        events.compactMap { if case .fired(let id) = $0 { return id } else { return nil } }
+        events.compactMap { if case .fired(let id, _) = $0 { return id } else { return nil } }
     }
+
+    var ended: [EngineEvent] {
+        events.filter { if case .ended = $0 { return true } else { return false } }
+    }
+
+    /// No readings for `seconds`, while the clock ticks every 10 ms.
+    func silence(_ seconds: Double) {
+        let end = now + seconds
+        while now < end - 0.000_001 {
+            now += 0.01
+            events += engine.tick(at: now)
+        }
+    }
+
+    /// The position `seconds` of real time after the last reading, as if
+    /// playback had carried on through a gap in the signal.
+    func position(after seconds: Double) -> String {
+        let last = position ?? .zero
+        return Timecode(frameIndex: last.frameIndex(at: rate) + Int((seconds * rate.realFramesPerSecond).rounded()),
+                        rate: rate).description
+    }
+
+    func fire(_ id: SongID) { events += engine.fire(id) }
+    func fireStop(_ id: SongID) { events += engine.fireStop(id) }
+    func clearEvents() { events.removeAll() }
 
     var sends: [OutgoingAction] {
         events.compactMap { if case .send(let send) = $0 { return send } else { return nil } }

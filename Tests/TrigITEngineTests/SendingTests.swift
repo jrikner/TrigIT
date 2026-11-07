@@ -28,7 +28,7 @@ final class SendingTests: XCTestCase {
     func testSendsFollowTheFiringEvent() {
         let timeline = Timeline(set: set, armed: true)
         timeline.play(from: "01:00:00:00", frames: 1)
-        let firedIndex = timeline.events.firstIndex(of: .fired(intro.id))
+        let firedIndex = timeline.events.firstIndex(of: .fired(intro.id, .entering))
         let firstSendIndex = timeline.events.firstIndex { if case .send = $0 { return true } else { return false } }
         XCTAssertNotNil(firedIndex)
         XCTAssertLessThan(firedIndex!, firstSendIndex!)

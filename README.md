@@ -36,3 +36,10 @@ Pick "Art-Net Timecode: interface" as the Timecode Source. TrigIT listens on UDP
 - **Overlaps:** every timecode position belongs to at most one Song. An edit that would overlap another Song is refused, and both Songs are highlighted.
 - **Import CSV:** one Song per row: name, start, end (hh:mm:ss:ff). Commas, semicolons or tabs, an optional header row, and quoted names all work. Invalid or overlapping rows are listed by line number and skipped.
 - **Show Lock:** the lock button in the top bar makes the Set read-only. Arming and the Simulator keep working.
+
+## Firing rules
+
+- **Entering** a Song (playing into it, or a Jump landing inside it) sends its Start Actions once.
+- **Stop:** no timecode for longer than the Set's Stop time (default 2 s, set above the Song list). Shorter gaps are Dropouts: logged, never re-firing.
+- **Ending:** a Stop while inside a Song, or playing on past its end, sends its Stop Actions once. A Jump out of a Song sends nothing. After a Stop, timecode resuming inside the same Song fires it again.
+- **Manual:** ▶ on a Song sends its Start Actions; ■ sends its Stop Actions. Both work while disarmed and under Show Lock.
