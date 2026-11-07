@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI // for MutableCollection.move(fromOffsets:toOffset:)
 import TrigITEngine
@@ -5,7 +6,7 @@ import TrigITProtocols
 import TrigITStorage
 
 /// The Timecode Source the show follows.
-enum TimecodeSourceChoice: Hashable {
+enum TimecodeSourceChoice: Hashable, Codable {
     case simulator
     /// LTC on one channel (0-based) of an audio input, remembered by device UID.
     case ltc(deviceUID: String, channel: Int)
@@ -112,6 +113,14 @@ final class ShowModel: ObservableObject {
     private let destinationChecker = DestinationChecker()
     private var timer: Timer?
     private var lastFedTimecode: Timecode?
+    /// The daily log files in ~/Library/Logs/TrigIT, kept 30 days.
+    private let showLog = ShowLog(directory: FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/TrigIT", isDirectory: true))
+    private var showLogFile: URL?
+    /// Whether the operator chose to let the Simulator drive the show while
+    /// Armed. Never remembered across launches, and cleared on disarming.
+    private var simulatorAllowedWhileArmed = false
+    private static let sourcesKey = "TrigIT.sources"
 
     private static let maxLogEntries = 500
 
@@ -136,7 +145,10 @@ final class ShowModel: ObservableObject {
         dmxStreamer.update(for: set)
         artNetInput.onPacket = { [weak self] packet, time in self?.receiveArtNet(packet, at: time) }
         if let status = midiInput.startError { record("MIDI is unavailable (error \(status))", isError: true) }
+        restoreSources()
         openLastDocument()
+        // TrigIT may have been relaunched mid-show: follow the show straight away.
+        setArmed(true)
         startClock()
         startDestinationChecks()
     }
@@ -148,8 +160,28 @@ final class ShowModel: ObservableObject {
     // MARK: Armed
 
     func setArmed(_ armed: Bool) {
+        if armed, simulator.isPlaying, !allowSimulatorWhileArmed(arming: true) { stop() }
         apply(engine.setArmed(armed))
-        if !armed { midiOutput.releaseAllNotes() }
+        if !armed {
+            simulatorAllowedWhileArmed = false
+            midiOutput.releaseAllNotes()
+        }
+    }
+
+    /// The Simulator only drives the show while Armed if the operator says so.
+    /// Returns whether it may.
+    private func allowSimulatorWhileArmed(arming: Bool = false) -> Bool {
+        guard arming || isArmed, role(of: .simulator) != nil, !simulatorAllowedWhileArmed else { return true }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Use the Simulator as the live timecode while Armed?"
+        alert.informativeText = "Songs it plays through will fire and send their Actions to real devices."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Use the Simulator")
+        guard alert.runModal() == .alertSecondButtonReturn else { return false }
+        simulatorAllowedWhileArmed = true
+        record("The Simulator drives the show while Armed")
+        return true
     }
 
     // MARK: Show Lock
@@ -423,21 +455,47 @@ final class ShowModel: ObservableObject {
     /// since each kind has one input.
     func selectSource(_ choice: TimecodeSourceChoice) {
         guard choice != source else { return }
+        if choice == .simulator, simulator.isPlaying, !allowSimulatorWhileArmed() { return }
         source = choice
         record("Primary Source: \(sourceLabel(choice))")
         if backupSource?.kind == choice.kind {
             backupSource = nil
             record("Backup Source: none")
         }
+        saveSources()
         restartInputs()
     }
 
     /// Chooses the Backup Source, or none. It must be a different kind than the Primary.
     func selectBackupSource(_ choice: TimecodeSourceChoice?) {
         guard choice != backupSource, choice?.kind != source.kind else { return }
+        if choice == .simulator, simulator.isPlaying, !allowSimulatorWhileArmed() { return }
         backupSource = choice
         record("Backup Source: \(choice.map(sourceLabel) ?? "none")")
+        saveSources()
         restartInputs()
+    }
+
+    private struct SavedSources: Codable {
+        var primary: TimecodeSourceChoice
+        var backup: TimecodeSourceChoice?
+        var noteSourceID: Int32?
+    }
+
+    /// Remembers the sources, so a relaunch carries on following the same timecode.
+    private func saveSources() {
+        let saved = SavedSources(primary: source, backup: backupSource, noteSourceID: noteSourceID)
+        UserDefaults.standard.set(try? JSONEncoder().encode(saved), forKey: Self.sourcesKey)
+    }
+
+    private func restoreSources() {
+        guard let data = UserDefaults.standard.data(forKey: Self.sourcesKey),
+              let saved = try? JSONDecoder().decode(SavedSources.self, from: data) else { return }
+        source = saved.primary
+        backupSource = saved.backup
+        noteSourceID = saved.noteSourceID
+        restartInputs()
+        if noteSourceID != nil { startNotes() }
     }
 
     /// The chosen source of a kind, if the Primary or Backup is of that kind.
@@ -513,6 +571,7 @@ final class ShowModel: ObservableObject {
         guard id != noteSourceID else { return }
         noteSourceID = id
         record("MIDI notes: \(noteSourceLabel(id))")
+        saveSources()
         startNotes()
     }
 
@@ -583,6 +642,7 @@ final class ShowModel: ObservableObject {
     // MARK: Simulator
 
     func play(from position: Timecode? = nil) {
+        guard allowSimulatorWhileArmed() else { return }
         simulator.play(from: position, at: now)
         lastFedTimecode = nil
         tick()
@@ -616,7 +676,7 @@ final class ShowModel: ObservableObject {
     }
 
     private func tick() {
-        if let role = role(of: .simulator), let reading = simulator.reading(at: now), reading.timecode != lastFedTimecode {
+        if let role = role(of: .simulator), !isArmed || simulatorAllowedWhileArmed, let reading = simulator.reading(at: now), reading.timecode != lastFedTimecode {
             lastFedTimecode = reading.timecode
             feed(reading, from: role)
         }
@@ -803,8 +863,20 @@ final class ShowModel: ObservableObject {
     }
 
     private func record(_ text: String, timecode: Timecode??, isError: Bool = false) {
-        log.insert(LogEntry(timecode: timecode ?? playhead, text: text, isError: isError), at: 0)
+        let entry = LogEntry(timecode: timecode ?? playhead, text: text, isError: isError)
+        log.insert(entry, at: 0)
         if log.count > Self.maxLogEntries { log.removeLast() }
+        writeToShowLog(entry)
+    }
+
+    private func writeToShowLog(_ entry: LogEntry) {
+        let file = showLog.fileURL(for: entry.date)
+        if file != showLogFile {
+            showLogFile = file
+            showLog.removeOldFiles(now: entry.date)
+        }
+        let line = [entry.timecode?.description ?? "--:--:--:--", entry.isError ? "!" : " ", entry.text].joined(separator: "  ")
+        try? showLog.append(line, at: entry.date)
     }
 
     private func nextFreeHour() -> Timecode {
