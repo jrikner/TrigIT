@@ -62,6 +62,8 @@ final class ShowModel: ObservableObject {
     @Published private(set) var alert: TimecodeAlert?
     @Published private(set) var audioInputDevices: [AudioInputDevice] = []
     @Published private(set) var midiSources: [MIDISourceInfo] = []
+    /// The MIDI source Start and Stop Notes are heard on, if any. It may be the MTC source.
+    @Published private(set) var noteSourceID: Int32?
     @Published private(set) var midiOutputs: [MIDIOutputInfo] = []
     /// Whether timecode is arriving from the live source right now.
     var isReceiving: Bool { healthySources.contains(liveSource) }
@@ -101,6 +103,9 @@ final class ShowModel: ObservableObject {
     private let dmxStreamer = DMXStreamer()
     private var midiParser = MIDIParser()
     private var mtcDecoder = MTCDecoder()
+    /// Separate from `midiInput` so notes can come from a different port than MTC.
+    private let noteInput = MIDIInput()
+    private var noteParser = MIDIParser()
     private let artNetInput = ArtNetTimecodeInput()
     private var timer: Timer?
     private var lastFedTimecode: Timecode?
@@ -118,6 +123,7 @@ final class ShowModel: ObservableObject {
         midiInput.onSourcesChanged = { [weak self] in self?.midiSourcesChanged() }
         midiInput.onBytes = { [weak self] bytes, time in self?.receiveMIDI(bytes, at: time) }
         midiSources = midiInput.sources()
+        noteInput.onBytes = { [weak self] bytes, _ in self?.receiveNotes(bytes) }
         midiOutput.onOutputsChanged = { [weak self] in
             guard let self else { return }
             self.midiOutputs = self.midiOutput.outputs()
@@ -204,6 +210,11 @@ final class ShowModel: ObservableObject {
     @discardableResult
     func update(_ song: Song) -> Bool {
         guard !isShowLocked else { return false }
+        guard song.hasTrigger else {
+            refusedEdit = RefusedEdit(songID: song.id, conflicts: [],
+                                      message: "\(song.name) needs a timecode span, a Start Note or a Stop Note; not changed")
+            return false
+        }
         var conflicts: [Song] = []
         edit { conflicts = $0.apply(song) }
         if conflicts.isEmpty {
@@ -464,6 +475,35 @@ final class ShowModel: ObservableObject {
         midiSources = midiInput.sources()
         // The chosen source may have come back or gone; reconnect either way.
         if choice(of: .mtc) != nil { startMTC() }
+        if noteSourceID != nil { startNotes() }
+    }
+
+    /// Chooses the MIDI source for Start and Stop Notes, or none.
+    func selectNoteSource(_ id: Int32?) {
+        guard id != noteSourceID else { return }
+        noteSourceID = id
+        record("MIDI notes: \(noteSourceLabel(id))")
+        startNotes()
+    }
+
+    func noteSourceLabel(_ id: Int32?) -> String {
+        guard let id else { return "None" }
+        return midiSources.first { $0.uniqueID == id }?.name ?? "missing MIDI source"
+    }
+
+    private func startNotes() {
+        noteInput.disconnect()
+        noteParser = MIDIParser()
+        guard let id = noteSourceID else { return }
+        if !noteInput.connect(to: id) {
+            record("MIDI note source is not connected; waiting for it", isError: true)
+        }
+    }
+
+    private func receiveNotes(_ bytes: [UInt8]) {
+        for message in noteParser.parse(bytes) {
+            apply(engine.handleMIDI(message))
+        }
     }
 
     private func receiveMIDI(_ bytes: [UInt8], at time: Double) {
@@ -577,7 +617,9 @@ final class ShowModel: ObservableObject {
             let name = song(id)?.name ?? "?"
             switch cause {
             case .manual: record("Fired \(name) by hand")
-            case .entering: record(isArmed ? "Fired \(name)" : "Fired \(name) (disarmed, nothing sent)")
+            case .entering, .note:
+                let how = cause == .note ? " by its Start Note" : ""
+                record(isArmed ? "Fired \(name)\(how)" : "Fired \(name)\(how) (disarmed, nothing sent)")
             }
         case .ended(let id, let cause):
             let name = song(id)?.name ?? "?"
@@ -585,6 +627,7 @@ final class ShowModel: ObservableObject {
             switch cause {
             case .stop: how = "timecode stopped"
             case .playedPastEnd: how = "played past its end"
+            case .note: how = "its Stop Note"
             case .manual: how = "Fire stop by hand"
             }
             let sends = cause != .manual && !isArmed && !(song(id)?.stopActions.isEmpty ?? true) ? ", disarmed, nothing sent" : ""
@@ -726,7 +769,7 @@ final class ShowModel: ObservableObject {
     }
 
     private func nextFreeHour() -> Timecode {
-        let lastHour = set.songs.map(\.end.hours).max() ?? 0
+        let lastHour = set.songs.filter(\.hasSpan).map(\.end.hours).max() ?? 0
         return Timecode(hours: min(lastHour + 1, 23), minutes: 0, seconds: 0, frames: 0)!
     }
 

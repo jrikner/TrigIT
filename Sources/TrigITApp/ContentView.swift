@@ -320,8 +320,25 @@ struct SourcePicker: View {
                     Text(model.sourceLabel(choice)).tag(Optional(choice))
                 }
             }
+            Picker("MIDI notes", selection: Binding(
+                get: { model.noteSourceID },
+                set: { model.selectNoteSource($0) }
+            )) {
+                Text("None").tag(Int32?.none)
+                ForEach(noteOptions, id: \.self) { id in
+                    Text(model.noteSourceLabel(id)).tag(Optional(id))
+                }
+            }
+            .help("Where Start and Stop Notes come from. It may be the same port as MTC.")
         }
         .frame(maxWidth: 420)
+    }
+
+    /// Every MIDI source, plus the chosen one if it is unplugged.
+    private var noteOptions: [Int32] {
+        var ids = model.midiSources.map(\.uniqueID)
+        if let current = model.noteSourceID, !ids.contains(current) { ids.append(current) }
+        return ids
     }
 
     /// Every available source, plus `current` if its device is unplugged, so

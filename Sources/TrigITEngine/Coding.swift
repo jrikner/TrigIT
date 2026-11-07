@@ -64,16 +64,23 @@ extension ShowSet: Codable {
 
 extension Song: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, name, start, end, startActions, stopActions
+        case id, name, start, end, startNote, stopNote, startActions, stopActions
     }
+
+    /// A Song without "start" has no span. Missing notes decode as none, so
+    /// files from before notes existed still open.
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let start = try c.decodeIfPresent(Timecode.self, forKey: .start)
         self.init(
             id: try c.decodeIfPresent(SongID.self, forKey: .id) ?? SongID(),
             name: try c.decodeIfPresent(String.self, forKey: .name) ?? "",
-            start: try c.decode(Timecode.self, forKey: .start),
-            end: try c.decode(Timecode.self, forKey: .end),
+            start: start ?? .zero,
+            end: start == nil ? .zero : try c.decode(Timecode.self, forKey: .end),
+            hasSpan: start != nil,
+            startNote: try c.decodeIfPresent(NoteTrigger.self, forKey: .startNote),
+            stopNote: try c.decodeIfPresent(NoteTrigger.self, forKey: .stopNote),
             startActions: try c.decodeIfPresent([Action].self, forKey: .startActions) ?? [],
             stopActions: try c.decodeIfPresent([Action].self, forKey: .stopActions) ?? []
         )
@@ -83,8 +90,12 @@ extension Song: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
-        try c.encode(start, forKey: .start)
-        try c.encode(end, forKey: .end)
+        if hasSpan {
+            try c.encode(start, forKey: .start)
+            try c.encode(end, forKey: .end)
+        }
+        try c.encodeIfPresent(startNote, forKey: .startNote)
+        try c.encodeIfPresent(stopNote, forKey: .stopNote)
         try c.encode(startActions, forKey: .startActions)
         try c.encode(stopActions, forKey: .stopActions)
     }
