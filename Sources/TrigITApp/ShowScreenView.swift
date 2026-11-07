@@ -11,12 +11,12 @@ struct ShowScreenView: View {
             VStack(alignment: .leading, spacing: 20) {
                 Spacer(minLength: 0)
                 sourceLine
-                Text(model.playhead?.description ?? "--:--:--:--")
+                Text(model.playhead?.description ?? "00:00:00:00")
                     .font(TrigType.playhead)
                     .tracking(-2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
-                    .foregroundColor(model.isReceiving || model.source == .simulator ? .primary : .secondary)
+                    .foregroundColor(model.playhead != nil && (model.isReceiving || model.source == .simulator) ? .primary : .secondary)
                     .accessibilityLabel("Playhead \(model.playhead?.description ?? "none")")
                 currentSong
                 progress
@@ -246,7 +246,7 @@ struct SimulatorPanel: View {
                     Spacer()
                     TextField("Simulator timecode", text: $targetText, prompt: Text("hh:mm:ss:ff"))
                         .labelsHidden()
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(TrigFieldStyle())
                         .font(TrigType.body.monospacedDigit())
                         .foregroundColor(target == nil ? StateColor.alert : .primary)
                         .frame(width: 130)

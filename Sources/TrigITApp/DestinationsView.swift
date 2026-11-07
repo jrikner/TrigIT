@@ -93,7 +93,7 @@ struct DestinationDetail: View {
                     GroupedBox {
                         FormRow(label: "Address") {
                             TextField("IP address", text: binding(\.host))
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(TrigFieldStyle())
                                 .font(TrigType.body.monospacedDigit())
                                 .frame(width: 220)
                         }
@@ -212,7 +212,7 @@ struct PortField: View {
             }
         ))
         .labelsHidden()
-        .textFieldStyle(.roundedBorder)
+        .textFieldStyle(TrigFieldStyle())
         .font(TrigType.body.monospacedDigit())
         .frame(width: 220)
         .foregroundColor(UInt16(text).map { $0 > 0 } == true ? .primary : StateColor.alert)
@@ -245,7 +245,7 @@ struct ReplyPortField: View {
             }
         ))
         .labelsHidden()
-        .textFieldStyle(.roundedBorder)
+        .textFieldStyle(TrigFieldStyle())
         .font(TrigType.body.monospacedDigit())
         .frame(width: 220)
         .foregroundColor(isValid ? .primary : StateColor.alert)

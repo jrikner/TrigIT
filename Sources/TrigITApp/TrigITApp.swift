@@ -67,6 +67,8 @@ struct SetCommands: Commands {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        // Without a bundle (`swift run`) the Dock would show a generic icon.
+        if Bundle.main.bundleIdentifier == nil { NSApp.applicationIconImage = AppIcon.image }
         NSApp.activate(ignoringOtherApps: true)
     }
 
