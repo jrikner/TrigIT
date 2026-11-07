@@ -62,3 +62,7 @@ _Avoid_: Triggering, executing
 **Armed**:
 The app-wide state in which Firing sends Actions. When disarmed, the app still follows timecode but sends nothing.
 _Avoid_: Live, enabled, active
+
+**Show Lock**:
+A switch that makes the Set read-only during a show, while arming and manual firing still work.
+_Avoid_: Lock mode, edit lock, safe mode
