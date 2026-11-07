@@ -274,11 +274,22 @@ final class ShowModel: ObservableObject {
     }
 
     func addAction(_ kind: NewActionKind, to songID: SongID, list: ActionList) {
+        addAction(kind.message, to: songID, list: list, canUse: kind.canUse)
+    }
+
+    /// Adds the ordinary Action a Resolume or grandMA3 preset fills in.
+    func addAction(_ preset: ActionPreset, to songID: SongID, list: ActionList) {
+        let message = preset.message
+        addAction(message, to: songID, list: list) { !message.isMIDI || $0.midiOutput != nil }
+    }
+
+    private func addAction(_ message: Action.Message, to songID: SongID, list: ActionList,
+                           canUse: (Destination) -> Bool) {
         guard var song = song(songID) else { return }
         // Prefer a Destination that can carry it: a MIDI output for MIDI, DMX for pulses.
-        let destination = set.destinations.first { kind.canUse($0) } ?? set.destinations.first
+        let destination = set.destinations.first(where: canUse) ?? set.destinations.first
         guard let destination else { return }
-        song[keyPath: list.keyPath].append(Action(destinationID: destination.id, message: kind.message))
+        song[keyPath: list.keyPath].append(Action(destinationID: destination.id, message: message))
         update(song)
     }
 
@@ -574,9 +585,23 @@ final class ShowModel: ObservableObject {
         case .ending, .manualStop: kind = " (Stop Action)"
         }
         let summary = "\(songName)\(kind) → \(destination.name): \(Self.describe(outgoing.action.message))"
-        let timecode = playhead
+        deliver(outgoing.action.message, to: destination, summary: summary)
+    }
 
-        switch outgoing.action.message {
+    /// Sends one Action now, Armed or not, and logs it as a test.
+    func test(_ action: Action, in songID: SongID) {
+        let songName = song(songID)?.name ?? "?"
+        guard let destination = set.destination(action.destinationID) else {
+            record("Test: \(songName): Action not sent, its Destination was deleted", isError: true)
+            return
+        }
+        deliver(action.message, to: destination,
+                summary: "Test: \(songName) → \(destination.name): \(Self.describe(action.message))")
+    }
+
+    private func deliver(_ message: Action.Message, to destination: Destination, summary: String) {
+        let timecode = playhead
+        switch message {
         case .osc(let message):
             guard message.hasValidAddress else {
                 record("\(summary) not sent: invalid OSC address", isError: true)
