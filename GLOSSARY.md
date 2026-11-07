@@ -47,6 +47,10 @@ _Avoid_: Track (clashes with Ableton's tracks), cue, scene
 One outgoing message a Song sends: an OSC message, a MIDI message, or an Art-Net/sACN pulse.
 _Avoid_: Command, output, trigger
 
+**Destination**:
+A named device that Actions are sent to, such as "Resolume" or "MA3", holding its network address and/or MIDI port. Each Action names one Destination.
+_Avoid_: Endpoint, target, output, device
+
 **Entering**:
 The Playhead arriving inside a Song's span from outside it, by playing into it or by a Jump landing anywhere inside it.
 _Avoid_: Hitting, reaching
