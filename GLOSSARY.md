@@ -25,12 +25,24 @@ _Avoid_: Current time, position
 A discontinuity in the Playhead: timecode arriving at a position that is not the natural next frame (skipping forward, backward, or starting mid-show).
 _Avoid_: Seek, scrub, locate
 
-### Cues
+### Show
 
-**Cue**:
-A single point in timecode with the messages to send when the Playhead reaches it.
-_Avoid_: Trigger, event, marker
+**Set**:
+The show: an ordered list of Songs, each with its own span of timecode.
+_Avoid_: Show file, playlist, cue list
+
+**Song**:
+One piece of music in the Set, owning a span of timecode and the Actions to send when that span is entered.
+_Avoid_: Track (clashes with Ableton's tracks), cue, scene
+
+**Action**:
+One outgoing message a Song sends: an OSC message, a MIDI message, or an Art-Net/sACN pulse.
+_Avoid_: Command, output, trigger
+
+**Entering**:
+The Playhead arriving inside a Song's span from outside it, by playing into it or by a Jump landing anywhere inside it.
+_Avoid_: Hitting, reaching
 
 **Firing**:
-A Cue sending its messages. A Cue fires when the Playhead passes its time in normal playback, or when a Jump lands after it and before the next Cue.
+A Song sending all its Actions, once, on Entering. Moving or jumping within the same Song does not fire it again; leaving for another Song and coming back does.
 _Avoid_: Triggering, executing
