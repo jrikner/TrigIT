@@ -25,6 +25,14 @@ _Avoid_: Current time, position
 A discontinuity in the Playhead: timecode arriving at a position that is not the natural next frame (skipping forward, backward, or starting mid-show).
 _Avoid_: Seek, scrub, locate
 
+**Stop**:
+Timecode ceasing from every Timecode Source for longer than a set time, as when Ableton's transport stops. Shorter gaps are Dropouts.
+_Avoid_: Pause, halt
+
+**Dropout**:
+A brief loss of timecode that is not a Stop; it never re-arms a Song.
+_Avoid_: Glitch, loss
+
 ### Show
 
 **Set**:
@@ -32,7 +40,7 @@ The show: an ordered list of Songs, each with its own span of timecode.
 _Avoid_: Show file, playlist, cue list
 
 **Song**:
-One piece of music in the Set, owning a span of timecode and the Actions to send when that span is entered.
+One piece of music in the Set, owning a span of timecode from a start to an end time, and the Actions to send when that span is entered. Timecode between Songs belongs to no Song.
 _Avoid_: Track (clashes with Ableton's tracks), cue, scene
 
 **Action**:
@@ -44,5 +52,9 @@ The Playhead arriving inside a Song's span from outside it, by playing into it o
 _Avoid_: Hitting, reaching
 
 **Firing**:
-A Song sending all its Actions, once, on Entering. Moving or jumping within the same Song does not fire it again; leaving for another Song and coming back does.
+A Song sending all its Actions, once, on Entering. Moving or jumping within the same Song does not fire it again; leaving it, or a Stop, re-arms it.
 _Avoid_: Triggering, executing
+
+**Armed**:
+The app-wide state in which Firing sends Actions. When disarmed, the app still follows timecode but sends nothing.
+_Avoid_: Live, enabled, active
