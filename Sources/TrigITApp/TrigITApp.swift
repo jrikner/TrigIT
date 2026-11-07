@@ -10,9 +10,9 @@ struct TrigITApp: App {
         WindowGroup("TrigIT") {
             ContentView()
                 .environmentObject(model)
-                // Fits the three panes' minimum widths (420 + 400 + 220) side by side.
-                .frame(minWidth: 1044, minHeight: 560)
+                .frame(minWidth: 1100, minHeight: 680)
         }
+        .defaultSize(width: 1280, height: 800)
         .commands { SetCommands(model: model) }
     }
 }
@@ -42,6 +42,11 @@ struct SetCommands: Commands {
                 .disabled(model.documentURL == nil)
             Button("Previous Versions…") { model.showingVersions = true }
                 .disabled(model.documentURL == nil)
+        }
+        CommandGroup(before: .windowList) {
+            Button("Welcome to TrigIT") { model.showingWelcome = true }
+                .disabled(model.isShowLocked)
+            Divider()
         }
         // Every edit is saved as it happens, so there is no Save command.
         CommandGroup(replacing: .saveItem) {}

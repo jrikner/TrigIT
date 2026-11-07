@@ -29,9 +29,9 @@ extension ShowModel {
     /// While editing, a previous version is kept at most this often.
     private static let versionInterval: TimeInterval = 120
 
-    var windowTitle: String {
-        guard let documentURL else { return "TrigIT — not saved" }
-        return "TrigIT — \(documentURL.deletingPathExtension().lastPathComponent)"
+    /// The open Set's name as the toolbar shows it.
+    var setTitle: String {
+        documentURL?.deletingPathExtension().lastPathComponent ?? "Not Saved"
     }
 
     // MARK: Opening
@@ -45,7 +45,7 @@ extension ShowModel {
         if let path = UserDefaults.standard.string(forKey: Self.lastDocumentKey) {
             open(URL(fileURLWithPath: path))
         } else {
-            create(Self.exampleSet, inFolder: Self.defaultSetsFolder)
+            showingWelcome = true
         }
     }
 
@@ -60,6 +60,8 @@ extension ShowModel {
             lastVersionSaved = nil
             keepVersion() // the Set as opened, before any edit
             remember(url)
+            showingWelcome = false
+            openingSetName = url.deletingPathExtension().lastPathComponent
             record("Opened \(url.lastPathComponent)")
         } catch {
             // Never overwrite a file we couldn't read: start an unsaved empty Set.
@@ -70,6 +72,8 @@ extension ShowModel {
             documentProblem = "Couldn't open \(url.lastPathComponent): \(reason) Open another Set, or create a new one."
             record(documentProblem!, isError: true)
             forget(url)
+            openingSetName = nil
+            showingWelcome = true
         }
     }
 
@@ -90,7 +94,31 @@ extension ShowModel {
         // Bring the Destinations along: they usually stay the same between shows.
         set.destinations = self.set.destinations
         write(set, to: url, opening: true)
+        if documentURL == url { showingNewSetSetup = true }
     }
+
+    /// Creates and opens the example Set in the default folder.
+    func openExample() {
+        guard !isShowLocked else { return }
+        create(Self.exampleSet, inFolder: Self.defaultSetsFolder)
+    }
+
+    /// Asks for a CSV file, creates a new Set named after it and imports its Songs.
+    func chooseAndImportCSVAsNewSet() {
+        guard !isShowLocked else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.commaSeparatedText, .tabSeparatedText, .plainText]
+        panel.message = "Choose a CSV file with the columns name, start, end (hh:mm:ss:ff)."
+        guard panel.runModal() == .OK, let csv = panel.url,
+              let text = (try? String(contentsOf: csv, encoding: .utf8)) ?? (try? String(contentsOf: csv, encoding: .isoLatin1))
+        else { return }
+        var set = ShowSet(name: csv.deletingPathExtension().lastPathComponent)
+        let report = set.importSongs(csv: text)
+        create(set, inFolder: Self.defaultSetsFolder)
+        record("Imported \(report.imported.count) Song(s) from \(csv.lastPathComponent); skipped \(report.problems.count) row(s)",
+               isError: !report.problems.isEmpty)
+    }
+
 
     /// Saves the current Set to a new place and carries on there.
     func chooseAndSaveAs() {
@@ -201,10 +229,16 @@ extension ShowModel {
         }
     }
 
+    /// The newest version stays marked while TrigIT is Armed.
+    func markCurrentVersionUsedInShow() {
+        if let latest = previousVersions.first { versionStore.markUsedInShow(latest) }
+    }
+
     private func keepVersion() {
         guard documentURL != nil else { return }
         do {
-            try versionStore.save(set, at: Date())
+            let version = try versionStore.save(set, at: Date())
+            if isArmed { versionStore.markUsedInShow(version) }
             lastVersionSaved = Date()
         } catch {
             record("Couldn't keep a previous version: \(error.localizedDescription)", isError: true)

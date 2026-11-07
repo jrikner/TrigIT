@@ -1,80 +1,177 @@
 import SwiftUI
 import TrigITEngine
 
-/// Named Destinations, each with an address, a port and the network interface
-/// its traffic must leave through.
+/// Destinations on the left; the selected one's address, MIDI and DMX on the right.
 struct DestinationsView: View {
     @EnvironmentObject private var model: ShowModel
+    @State private var selection: DestinationID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Destinations").font(.headline)
-                Spacer()
-                Button("Add Destination") { model.addDestination() }
-                    .disabled(model.isShowLocked)
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                List(selection: $selection) {
+                    ForEach(model.set.destinations) { destination in
+                        row(destination).tag(destination.id)
+                    }
+                }
+                .listStyle(.inset)
+                RowDivider()
+                HStack {
+                    Button {
+                        model.addDestination()
+                        selection = model.set.destinations.last?.id
+                    } label: { Label("Destination", systemImage: "plus") }
+                    Spacer()
+                    let inUse = selection.map(model.set.isInUse) ?? false
+                    Button {
+                        if let selection { model.deleteDestination(selection) }
+                        selection = nil
+                    } label: { Label("Delete Destination", systemImage: "minus").labelStyle(.iconOnly) }
+                    .disabled(selection == nil || inUse)
+                    .help(inUse ? "Used by an Action; remove those Actions first" : "Delete the selected Destination")
+                }
+                .capsuleButton()
+                .disabled(model.isShowLocked)
+                .padding(12)
             }
+            .frame(width: 340)
+            .overlay(alignment: .trailing) { Rectangle().fill(Surface.hairline).frame(width: 1) }
 
-            // A Table keeps headers aligned, lets columns be resized, and
-            // scrolls sideways instead of clipping when the pane is narrow.
-            Table(model.set.destinations) {
-                TableColumn("Name") { destination in
-                    TextField("Name", text: binding(destination, \.name))
-                        .labelsHidden()
+            Group {
+                if let selection, let destination = model.set.destination(selection) {
+                    DestinationDetail(destination: destination).id(destination.id)
+                } else {
+                    Text("Select a Destination").font(TrigType.body).foregroundColor(.secondary)
                 }
-                .width(min: 80, ideal: 120)
-                TableColumn("Address") { destination in
-                    TextField("IP address", text: binding(destination, \.host))
-                        .labelsHidden()
-                        .font(.system(.body, design: .monospaced))
-                }
-                .width(min: 100, ideal: 140)
-                TableColumn("Port") { destination in
-                    PortField(destination: destination)
-                }
-                .width(min: 56, ideal: 64, max: 80)
-                TableColumn("Reply Port") { destination in
-                    ReplyPortField(destination: destination)
-                }
-                .width(min: 56, ideal: 72, max: 90)
-                TableColumn("Network Interface") { destination in
-                    InterfacePicker(destination: destination, selection: binding(destination, \.networkInterface))
-                }
-                .width(min: 110, ideal: 170)
-                TableColumn("MIDI Output") { destination in
-                    MIDIOutputPicker(destination: destination, selection: binding(destination, \.midiOutput))
-                }
-                .width(min: 100, ideal: 170)
-                TableColumn("DMX") { destination in
-                    Picker("DMX output", selection: binding(destination, \.dmxOutput)) {
-                        Text("None").tag(DMXOutput?.none)
-                        ForEach(DMXOutput.allCases, id: \.self) { output in
-                            Text(output.name).tag(DMXOutput?.some(output))
-                        }
-                    }
-                    .labelsHidden()
-                    .help("For pulse Actions. Art-Net goes to the address (a node, or a broadcast address such as 2.255.255.255); sACN multicast ignores it; sACN unicast uses it. Both use the chosen network interface.")
-                }
-                .width(min: 90, ideal: 140)
-                TableColumn("") { destination in
-                    let inUse = model.set.isInUse(destination.id)
-                    Button(role: .destructive) {
-                        model.deleteDestination(destination.id)
-                    } label: {
-                        Label("Delete Destination", systemImage: "trash").labelStyle(.iconOnly)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(inUse)
-                    .help(inUse ? "Used by an Action; remove those Actions first" : "Delete this Destination")
-                }
-                .width(24)
             }
-            .disabled(model.isShowLocked)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(8)
+        .onAppear { if selection == nil { selection = model.set.destinations.first?.id } }
     }
 
-    private func binding<Value>(_ destination: Destination, _ keyPath: WritableKeyPath<Destination, Value>) -> Binding<Value> {
+    private func row(_ destination: Destination) -> some View {
+        let state = model.reachability(of: destination.id)
+        return HStack(spacing: 10) {
+            StateDot(color: state.color)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(destination.name).font(TrigType.rowTitle).lineLimit(1)
+                Text(destination.transports).font(TrigType.secondary).foregroundColor(.secondary).lineLimit(1)
+            }
+            Spacer()
+            if state != .reachable {
+                Text(state.word).font(TrigType.secondary).foregroundColor(state == .noReply ? StateColor.alert : .secondary)
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension Destination {
+    /// "OSC 10.0.0.21:7000, IAC Bus 1, Art-Net"
+    var transports: String {
+        (["OSC \(host):\(port)"] + [midiOutput?.name, dmxOutput?.name].compactMap { $0 }).joined(separator: ", ")
+    }
+}
+
+struct DestinationDetail: View {
+    @EnvironmentObject private var model: ShowModel
+    let destination: Destination
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Name", text: binding(\.name))
+                        .textFieldStyle(.plain)
+                        .font(TrigType.pageTitle)
+                    status
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    GroupHeader("Network (OSC)")
+                    GroupedBox {
+                        FormRow(label: "Address") {
+                            TextField("IP address", text: binding(\.host))
+                                .textFieldStyle(.roundedBorder)
+                                .font(TrigType.body.monospacedDigit())
+                                .frame(width: 220)
+                        }
+                        RowDivider()
+                        FormRow(label: "Port") { PortField(destination: destination) }
+                        RowDivider()
+                        FormRow(label: "Reply port") { ReplyPortField(destination: destination) }
+                        RowDivider()
+                        FormRow(label: "Network interface") {
+                            InterfacePicker(destination: destination, selection: binding(\.networkInterface)).frame(width: 260)
+                        }
+                    }
+                    Footnote("A reply on the reply port marks the Destination Reachable. Leave it empty if the device sends none.")
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    GroupHeader("MIDI")
+                    GroupedBox {
+                        FormRow(label: "Output") {
+                            MIDIOutputPicker(destination: destination, selection: binding(\.midiOutput)).frame(width: 260)
+                        }
+                    }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    GroupHeader("DMX")
+                    GroupedBox {
+                        FormRow(label: "Protocol") {
+                            Picker("DMX output", selection: binding(\.dmxOutput)) {
+                                Text("None").tag(DMXOutput?.none)
+                                ForEach(DMXOutput.allCases, id: \.self) { Text($0.name).tag(DMXOutput?.some($0)) }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .fixedSize()
+                        }
+                    }
+                    Footnote("For pulse Actions. Art-Net goes to the address (a node, or a broadcast address such as 2.255.255.255); sACN multicast ignores it; sACN unicast uses it. Both use the chosen network interface.")
+                }
+                HStack(spacing: 16) {
+                    Button("Send Test") { model.testDestination(destination) }
+                        .capsuleButton()
+                        .help("Send the OSC message /trigit/test to this Destination")
+                    Text(usage).font(TrigType.secondary).foregroundColor(.secondary)
+                }
+            }
+            .padding(EdgeInsets(top: 16, leading: 32, bottom: 28, trailing: 32))
+            .disabled(model.isShowLocked)
+        }
+    }
+
+    private var status: some View {
+        let state = model.reachability(of: destination.id)
+        let monitor = model.destinationStatuses[destination.id]
+        let detail: String = {
+            if case .offline = monitor, let monitor { return ShowModel.statusText(monitor).capitalizedFirst }
+            if let send = model.destinationSends[destination.id] {
+                return send.ok ? "Last send at \(send.date.formatted(date: .omitted, time: .standard))" : (send.errorText ?? "")
+            }
+            return state == .reachable ? "Replying" : "Nothing sent yet"
+        }()
+        return HStack(spacing: 8) {
+            StateDot(color: state.color)
+            Text(state.word).font(TrigType.body).foregroundColor(state == .noReply ? StateColor.alert : .primary)
+            Text(detail).font(TrigType.body).foregroundColor(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var usage: String {
+        let users = model.set.songs.map { song in
+            (song.startActions + song.stopActions).filter { $0.destinationID == destination.id }.count
+        }
+        let songs = users.filter { $0 > 0 }.count
+        let actions = users.reduce(0, +)
+        guard actions > 0 else { return "Not used by any Action" }
+        return "Used by \(songs) Song\(songs == 1 ? "" : "s") in \(actions) Action\(actions == 1 ? "" : "s")"
+    }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<Destination, Value>) -> Binding<Value> {
         Binding(
             get: { destination[keyPath: keyPath] },
             set: { value in
@@ -84,6 +181,10 @@ struct DestinationsView: View {
             }
         )
     }
+}
+
+extension String {
+    var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
 }
 
 /// The port, kept as typed text so a half-typed or invalid value can show red
@@ -111,8 +212,10 @@ struct PortField: View {
             }
         ))
         .labelsHidden()
-        .font(.system(.body, design: .monospaced))
-        .foregroundColor(UInt16(text).map { $0 > 0 } == true ? .primary : .red)
+        .textFieldStyle(.roundedBorder)
+        .font(TrigType.body.monospacedDigit())
+        .frame(width: 220)
+        .foregroundColor(UInt16(text).map { $0 > 0 } == true ? .primary : StateColor.alert)
         .onChange(of: destination.port) { text = String($0) }
     }
 }
@@ -142,8 +245,10 @@ struct ReplyPortField: View {
             }
         ))
         .labelsHidden()
-        .font(.system(.body, design: .monospaced))
-        .foregroundColor(isValid ? .primary : .red)
+        .textFieldStyle(.roundedBorder)
+        .font(TrigType.body.monospacedDigit())
+        .frame(width: 220)
+        .foregroundColor(isValid ? .primary : StateColor.alert)
         .help("Where the device sends OSC replies (Resolume's OSC output, a grandMA3). A reply marks it online. Leave empty if it sends none.")
         .onChange(of: destination.replyPort) { text = $0.map(String.init) ?? "" }
     }

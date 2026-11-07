@@ -4,475 +4,347 @@ import TrigITStorage
 
 struct ContentView: View {
     @EnvironmentObject private var model: ShowModel
-    @SceneStorage("showFireLog") private var showFireLog = true
+    @SceneStorage("appMode") private var mode: AppMode = .edit
+    @SceneStorage("editSection") private var section: EditSection = .songs
 
     var body: some View {
+        ZStack {
+            if model.showingWelcome {
+                WelcomeView()
+            } else {
+                main
+            }
+            if let name = model.openingSetName {
+                OpeningView(setName: name)
+            }
+        }
+        .preferredColorScheme(.dark)
+        // A neutral accent, so selection never reads as a state colour.
+        .tint(Color(nsColor: .systemGray))
+        .sheet(isPresented: $model.showingVersions) { PreviousVersionsView() }
+        .sheet(isPresented: $model.showingNewSetSetup) { NewSetSetupView() }
+    }
+
+    private var main: some View {
         VStack(spacing: 0) {
             if let problem = model.documentProblem {
-                Label(problem, systemImage: "exclamationmark.triangle.fill")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(Color.red)
-                    .foregroundColor(.white)
-                    .textSelection(.enabled)
-                Divider()
+                Banner(text: problem, pulses: false)
             }
-            HSplitView {
-                TabView {
-                    SetEditorView()
-                        .tabItem { Text("Songs") }
-                    DestinationsView()
-                        .tabItem { Text("Destinations") }
-                }
-                .padding(8)
-                .frame(minWidth: 420, idealWidth: 520, maxWidth: .infinity)
-                .layoutPriority(1)
-
-                VStack(spacing: 0) {
-                    ShowScreenView()
-                    Divider()
-                    SimulatorControlsView()
-                }
-                .frame(minWidth: 400, idealWidth: 520, maxWidth: .infinity)
-                .layoutPriority(1)
-
-                if showFireLog {
-                    FireLogView()
-                        .frame(minWidth: 220, idealWidth: 300, maxWidth: 480)
-                }
-            }
-        }
-        .toolbar { ShowToolbar(showFireLog: $showFireLog) }
-        .navigationTitle(model.windowTitle)
-        .sheet(isPresented: $model.showingVersions) {
-            PreviousVersionsView()
-        }
-    }
-}
-
-/// The Set's automatically kept earlier versions, newest first.
-struct PreviousVersionsView: View {
-    @EnvironmentObject private var model: ShowModel
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Previous versions of \(model.set.name)").font(.headline)
-            Text("TrigIT keeps a version when a Set is opened and every two minutes while it is edited (the last 100). Restoring keeps the current Set as a version first, and can be undone.")
-                .font(.callout)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            let versions = model.previousVersions
-            if versions.isEmpty {
-                Text("No previous versions yet.").foregroundColor(.secondary)
-            } else {
-                List(versions, id: \.url) { version in
-                    HStack {
-                        Text(version.date.formatted(date: .abbreviated, time: .standard))
-                            .font(.system(.body, design: .monospaced))
-                        Spacer()
-                        Button("Restore") {
-                            model.restore(version)
-                            dismiss()
-                        }
-                        .disabled(model.isShowLocked)
-                    }
-                }
-                .frame(minHeight: 240)
-            }
-            HStack {
-                Spacer()
-                Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
-            }
-        }
-        .padding(20)
-        .frame(minWidth: 460)
-    }
-}
-
-// MARK: - Toolbar
-
-/// Arm, Show Lock and the Fire log, in the window's native toolbar.
-struct ShowToolbar: ToolbarContent {
-    @EnvironmentObject private var model: ShowModel
-    @Binding var showFireLog: Bool
-
-    var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .navigation) {
-            Button {
-                model.setArmed(!model.isArmed)
-            } label: {
-                // Icon plus word, so the state never depends on color alone.
-                Label(model.isArmed ? "Armed" : "Disarmed",
-                      systemImage: model.isArmed ? "bolt.fill" : "bolt.slash")
-                    .labelStyle(.titleAndIcon)
-                    .font(.headline)
-                    .frame(minWidth: 110)
-            }
-            .buttonStyle(EngagedButtonStyle(isEngaged: model.isArmed, color: .red))
-            .keyboardShortcut("a", modifiers: [.command, .shift])
-            .help(model.isArmed ? "Disarm (⇧⌘A): timecode is still followed, nothing is sent"
-                                : "Arm (⇧⌘A): Songs send their Actions when entered")
-            .accessibilityValue(model.isArmed ? "Armed" : "Disarmed")
-
-            Button {
-                model.setShowLocked(!model.isShowLocked)
-            } label: {
-                Label("Show Lock", systemImage: model.isShowLocked ? "lock.fill" : "lock.open")
-                    .labelStyle(.titleAndIcon)
-            }
-            .buttonStyle(EngagedButtonStyle(isEngaged: model.isShowLocked, color: .orange))
-            .accessibilityAddTraits(model.isShowLocked ? .isSelected : [])
-            .help("Make the Set read-only during the show. Arming and the Simulator still work.")
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Toggle(isOn: $showFireLog) {
-                Label("Fire Log", systemImage: "sidebar.right")
-            }
-            .toggleStyle(.button)
-            .help(showFireLog ? "Hide the Fire log" : "Show the Fire log")
-        }
-    }
-}
-
-/// A toolbar button that fills with `color` while its state is on. Toolbar
-/// items ignore `.tint` and `.borderedProminent`, so this draws its own fill.
-struct EngagedButtonStyle: ButtonStyle {
-    let isEngaged: Bool
-    let color: Color
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            // Black, not white: white on system red/orange is under 4.5:1 contrast.
-            .foregroundColor(isEngaged ? .black : .primary)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isEngaged ? color : Color.primary.opacity(0.08))
-            )
-            .opacity(configuration.isPressed ? 0.75 : 1)
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-    }
-}
-
-// MARK: - Show screen
-
-struct ShowScreenView: View {
-    @EnvironmentObject private var model: ShowModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
             let problems = model.alertLines
             if !problems.isEmpty {
-                TimecodeAlertBanner(text: problems.joined(separator: "\n"))
+                Banner(text: problems.joined(separator: "\n"), pulses: true)
             }
-            HStack {
-                SourceBadge()
-                Spacer()
-                Text(model.frameRate.map { "\($0.rawValue) fps" } ?? "-- fps")
-                    .font(.system(.title3, design: .monospaced))
+            switch mode {
+            case .show: ShowScreenView()
+            case .edit: EditView(section: $section)
             }
-            SourcePicker()
-            SourceHealthView()
-            DestinationStatusView()
-
-            Text(model.playhead?.description ?? "--:--:--:--")
-                .font(.system(size: 76, weight: .bold, design: .monospaced))
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .center)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Current Song").font(.caption).foregroundColor(.secondary)
-                Text(model.currentSong?.name ?? "No Song")
-                    .font(.largeTitle.weight(.semibold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.6)
-                    .foregroundColor(model.currentSong == nil ? .secondary : .primary)
-            }
-            Spacer(minLength: 0)
         }
-        .padding(20)
+        .safeAreaInset(edge: .bottom) {
+            if model.source == .simulator || model.backupSource == .simulator {
+                SimulatorPanel().padding(8)
+            }
+        }
+        .background(modeShortcuts)
+        .toolbar { toolbar }
+        .navigationTitle(mode == .show ? model.setTitle : section.rawValue)
+        .navigationSubtitle(mode == .show ? "" : model.setTitle)
+    }
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Picker("Mode", selection: $mode) {
+                Text("Show").tag(AppMode.show)
+                Text("Edit").tag(AppMode.edit)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 160)
+            .help("Show (⌘1) or Edit (⌘2)")
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            if mode == .show {
+                ShowLockButton()
+            } else if section == .fireLog {
+                Button("Export…") { model.exportLog() }.capsuleButton()
+            } else {
+                SourceStatusLabel()
+            }
+            ArmButton()
+        }
+    }
+
+    /// ⌘1 and ⌘2 switch modes.
+    private var modeShortcuts: some View {
+        ZStack {
+            Button("Show") { mode = .show }.keyboardShortcut("1")
+            Button("Edit") { mode = .edit }.keyboardShortcut("2")
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 }
 
-// MARK: - Timecode Source
+// MARK: - Edit mode
 
-/// A flashing red banner saying exactly what is wrong with timecode and which
-/// Destinations are offline. It goes away by itself when all is fixed.
-struct TimecodeAlertBanner: View {
+struct EditView: View {
+    @EnvironmentObject private var model: ShowModel
+    @Binding var section: EditSection
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: Binding<EditSection?>(get: { section }, set: { if let new = $0 { section = new } })) {
+                Section {
+                    ForEach(EditSection.allCases) { item in
+                        sidebarRow(item).tag(item)
+                    }
+                } header: {
+                    Text(model.set.name).font(TrigType.groupHeader)
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 230)
+        } detail: {
+            switch section {
+            case .songs: SetEditorView()
+            case .destinations: DestinationsView()
+            case .timecode: TimecodeView()
+            case .fireLog: FireLogView()
+            }
+        }
+    }
+
+    private func sidebarRow(_ item: EditSection) -> some View {
+        HStack {
+            Label(item.rawValue, systemImage: item.symbol).font(TrigType.body)
+            Spacer()
+            if item == .destinations, model.set.destinations.contains(where: { model.reachability(of: $0.id) == .noReply }) {
+                StateDot(color: StateColor.alert, size: 8).accessibilityLabel("A Destination has no reply")
+            }
+            if let count = count(item) {
+                Text("\(count)").font(TrigType.secondary.monospacedDigit()).foregroundColor(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func count(_ item: EditSection) -> Int? {
+        switch item {
+        case .songs: return model.set.songs.count
+        case .destinations: return model.set.destinations.count
+        case .timecode, .fireLog: return nil
+        }
+    }
+}
+
+// MARK: - Toolbar source status
+
+/// What the live source is doing, as the toolbar and Show screen say it.
+struct SourceState {
+    let color: Color
+    let title: String
+    let detail: String
+
+    @MainActor
+    init(_ model: ShowModel) {
+        let live = (model.liveSource == .backup ? model.backupSource : nil) ?? model.source
+        let rate = model.frameRate.map { "\($0.rawValue) fps" } ?? ""
+        if live == .simulator {
+            color = StateColor.caution
+            title = "Simulator"
+            detail = model.simulator.isPlaying ? "Playing, \(model.simulator.frameRate.rawValue) fps" : "Stopped"
+        } else if !model.isReceiving {
+            color = StateColor.alert
+            title = "No signal"
+            detail = "Holding the last frame"
+        } else if model.liveSource == .backup {
+            color = StateColor.caution
+            title = "Following Backup \(live.kindName)"
+            detail = "Primary \(model.source.kindName) lost"
+        } else {
+            color = StateColor.ok
+            title = "Receiving \(live.kindName)"
+            detail = rate
+        }
+    }
+}
+
+extension TimecodeSourceChoice {
+    var kindName: String {
+        switch self {
+        case .simulator: return "Simulator"
+        case .ltc: return "LTC"
+        case .mtc: return "MTC"
+        case .artNet: return "Art-Net"
+        }
+    }
+}
+
+struct SourceStatusLabel: View {
+    @EnvironmentObject private var model: ShowModel
+
+    var body: some View {
+        let state = SourceState(model)
+        HStack(spacing: 8) {
+            StateDot(color: state.color)
+            Text(state.title).font(.system(size: 15, weight: .semibold))
+        }
+        .padding(.horizontal, 8)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Banners
+
+/// A red banner. Timecode and Destination problems pulse (unless Reduce
+/// Motion is on) and go away by themselves when fixed.
+struct Banner: View {
     let text: String
+    let pulses: Bool
     @State private var dim = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Label(text, systemImage: "exclamationmark.triangle.fill")
-            .font(.title3.weight(.bold))
+            .font(.system(size: 19, weight: .semibold))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.red))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
             .foregroundColor(.white)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(StateColor.alert))
             .opacity(dim ? 0.35 : 1)
+            .padding([.horizontal, .top], 16)
+            .textSelection(.enabled)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.updatesFrequently)
             .onAppear {
-                guard !reduceMotion else { return }
+                guard pulses, !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { dim = true }
             }
     }
 }
 
-/// Each Destination's name and whether it is online, offline or unknown.
-struct DestinationStatusView: View {
+// MARK: - Previous Versions
+
+/// The Set's automatically kept earlier versions, newest first, grouped by day.
+struct PreviousVersionsView: View {
     @EnvironmentObject private var model: ShowModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var rows: [Row] = []
+    @State private var selection: URL?
+
+    struct Row: Identifiable {
+        let version: SetVersion
+        let summary: String
+        var id: URL { version.url }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(model.set.destinations) { destination in
-                let status = model.destinationStatuses[destination.id] ?? .unknown
-                HStack(spacing: 6) {
-                    switch status {
-                    case .online: Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-                    case .offline: Image(systemName: "xmark.octagon.fill").foregroundColor(.red)
-                    case .unknown: Image(systemName: "questionmark.circle").foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Previous Versions").font(TrigType.sectionTitle)
+            Text("TrigIT keeps a version when the Set is opened and every two minutes while you edit, up to 100. Restoring saves the current Set as a version first.")
+                .font(.system(size: 16))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if rows.isEmpty {
+                Text("No previous versions yet.").font(TrigType.body).foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 200)
+            } else {
+                List(selection: $selection) {
+                    ForEach(days, id: \.title) { day in
+                        Section {
+                            ForEach(day.rows) { row in
+                                versionRow(row).tag(row.id)
+                            }
+                        } header: {
+                            Text(day.title).font(TrigType.groupHeader).foregroundColor(.secondary)
+                        }
                     }
-                    Text(destination.name).lineLimit(1)
-                    Text(ShowModel.statusText(status))
-                        .foregroundColor(status.isOffline ? .red : .secondary)
-                        .lineLimit(1)
                 }
-                .accessibilityElement(children: .combine)
+                .frame(minHeight: 320)
             }
-        }
-        .font(.callout)
-    }
-}
-
-/// Each chosen source, its health, and which one is live.
-struct SourceHealthView: View {
-    @EnvironmentObject private var model: ShowModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            row(.primary)
-            if model.backupSource != nil { row(.backup) }
-        }
-        .font(.callout)
-    }
-
-    private func row(_ role: SourceRole) -> some View {
-        let healthy = model.healthySources.contains(role)
-        let live = model.liveSource == role
-        return HStack(spacing: 6) {
-            Image(systemName: healthy ? "checkmark.circle.fill" : "xmark.octagon.fill")
-                .foregroundColor(healthy ? .green : .red)
-            Text(role == .primary ? "Primary" : "Backup").fontWeight(live ? .bold : .regular)
-            Text(model.sourceLabel(for: role)).foregroundColor(.secondary).lineLimit(1)
-            Text(healthy ? "OK" : "lost").foregroundColor(healthy ? .secondary : .red)
-            if live { Text("LIVE").font(.caption.weight(.bold)).foregroundColor(.green) }
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// Which source is live and whether timecode is arriving from it.
-struct SourceBadge: View {
-    @EnvironmentObject private var model: ShowModel
-
-    private var live: TimecodeSourceChoice {
-        (model.liveSource == .backup ? model.backupSource : nil) ?? model.source
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            switch live {
-            case .simulator:
-                badge("SIMULATOR", color: .orange)
-                Text(model.simulator.isPlaying ? "Playing" : "Stopped")
-                    .foregroundColor(.secondary)
-            case .ltc, .mtc, .artNet:
-                badge(sourceKind, color: .green)
-                if model.isReceiving {
-                    Text("Receiving").foregroundColor(.secondary)
-                } else {
-                    Text("NO SIGNAL")
-                        .font(.headline)
-                        .foregroundColor(.red)
-                }
-            }
-        }
-    }
-
-    private var sourceKind: String {
-        switch live {
-        case .mtc: return "MTC"
-        case .artNet: return "ART-NET TC"
-        default: return "LTC"
-        }
-    }
-
-    private func badge(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.headline)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(color))
-            .foregroundColor(.black)
-    }
-}
-
-/// The Primary Source and the optional Backup Source.
-struct SourcePicker: View {
-    @EnvironmentObject private var model: ShowModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Picker("Primary Source", selection: Binding(
-                get: { model.source },
-                set: { model.selectSource($0) }
-            )) {
-                ForEach(options(current: model.source), id: \.self) { choice in
-                    Text(model.sourceLabel(choice)).tag(choice)
-                }
-            }
-            Picker("Backup Source", selection: Binding<TimecodeSourceChoice?>(
-                get: { model.backupSource },
-                set: { model.selectBackupSource($0) }
-            )) {
-                Text("None").tag(TimecodeSourceChoice?.none)
-                // One input per kind: the Backup must be a different kind than the Primary.
-                ForEach(options(current: model.backupSource).filter { $0.kind != model.source.kind }, id: \.self) { choice in
-                    Text(model.sourceLabel(choice)).tag(Optional(choice))
-                }
-            }
-            Picker("MIDI notes", selection: Binding(
-                get: { model.noteSourceID },
-                set: { model.selectNoteSource($0) }
-            )) {
-                Text("None").tag(Int32?.none)
-                ForEach(noteOptions, id: \.self) { id in
-                    Text(model.noteSourceLabel(id)).tag(Optional(id))
-                }
-            }
-            .help("Where Start and Stop Notes come from. It may be the same port as MTC.")
-        }
-        .frame(maxWidth: 420)
-    }
-
-    /// Every MIDI source, plus the chosen one if it is unplugged.
-    private var noteOptions: [Int32] {
-        var ids = model.midiSources.map(\.uniqueID)
-        if let current = model.noteSourceID, !ids.contains(current) { ids.append(current) }
-        return ids
-    }
-
-    /// Every available source, plus `current` if its device is unplugged, so
-    /// a missing device stays visible rather than silently switching.
-    private func options(current: TimecodeSourceChoice?) -> [TimecodeSourceChoice] {
-        var choices: [TimecodeSourceChoice] = [.simulator]
-        for device in model.audioInputDevices {
-            choices += (0..<device.channelCount).map { .ltc(deviceUID: device.uid, channel: $0) }
-        }
-        choices += model.midiSources.map { .mtc(sourceID: $0.uniqueID) }
-        choices += model.networkInterfaces.map { .artNet(interface: $0.name) }
-        choices.append(.artNet(interface: nil))
-        if let current, !choices.contains(current) { choices.append(current) }
-        return choices
-    }
-}
-
-// MARK: - Simulator controls
-
-struct SimulatorControlsView: View {
-    @EnvironmentObject private var model: ShowModel
-    @State private var targetText = "01:00:00:00"
-
-    private var target: Timecode? { Timecode(targetText) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Simulator").font(.headline)
             HStack {
-                TextField("Simulator timecode", text: $targetText, prompt: Text("hh:mm:ss:ff"))
-                    .labelsHidden()
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundColor(target == nil ? .red : .primary)
-                    .frame(minWidth: 100, idealWidth: 120, maxWidth: 120)
-                Button("Play from") { if let target { model.play(from: target) } }
-                    .disabled(target == nil)
-                Button("Jump") { if let target { model.jump(to: target) } }
-                    .disabled(target == nil)
                 Spacer()
-                Button("Play") { model.play() }
-                    .disabled(model.simulator.isPlaying)
-                Button("Stop") { model.stop() }
-                    .disabled(!model.simulator.isPlaying)
-            }
-            Picker("Frame rate", selection: Binding(
-                get: { model.simulator.frameRate },
-                set: { model.setSimulatorFrameRate($0) }
-            )) {
-                ForEach(FrameRate.allCases, id: \.self) { rate in
-                    Text(rate.rawValue).tag(rate)
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .capsuleButton()
+                Button("Restore") {
+                    if let row = rows.first(where: { $0.id == selection }) { model.restore(row.version) }
+                    dismiss()
                 }
+                .keyboardShortcut(.defaultAction)
+                .prominentCapsuleButton()
+                .disabled(selection == nil || model.isShowLocked)
             }
-            .pickerStyle(.segmented)
         }
-        .padding(20)
-        // Disabled controls already dim themselves; extra opacity would dim them twice.
-        .disabled(model.source != .simulator && model.backupSource != .simulator)
+        .padding(26)
+        .frame(width: 680)
+        .onAppear(perform: load)
     }
-}
 
-// MARK: - Fire log
-
-struct FireLogView: View {
-    @EnvironmentObject private var model: ShowModel
-
-    private static let timeFormat: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        return formatter
-    }()
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Fire log").font(.headline).padding([.top, .horizontal], 12)
-            List(model.log) { entry in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(Self.timeFormat.string(from: entry.date))
-                        Text(entry.timecode?.description ?? "")
-                    }
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    Text(entry.text)
-                        .foregroundColor(entry.isError ? .red : .primary)
-                        .textSelection(.enabled)
+    private func versionRow(_ row: Row) -> some View {
+        HStack(spacing: 12) {
+            Text(row.version.date.formatted(date: .omitted, time: .shortened))
+                .font(TrigType.rowTitle.monospacedDigit())
+                .frame(width: 64, alignment: .leading)
+            Text(row.summary).font(TrigType.body).lineLimit(1)
+            Spacer()
+            if row.version.usedInShow {
+                HStack(spacing: 6) {
+                    StateDot(color: StateColor.caution, size: 8)
+                    Text("Used in a show").font(TrigType.secondary)
                 }
             }
         }
+        .padding(.vertical, 6)
+    }
+
+    private var days: [(title: String, rows: [Row])] {
+        let calendar = Calendar.current
+        var result: [(title: String, rows: [Row])] = []
+        for row in rows {
+            let date = row.version.date
+            let title = calendar.isDateInToday(date) ? "Today"
+                : calendar.isDateInYesterday(date) ? "Yesterday"
+                : date.formatted(date: .complete, time: .omitted)
+            if result.last?.title == title { result[result.count - 1].rows.append(row) } else { result.append((title, [row])) }
+        }
+        return result
+    }
+
+    /// Reads every version once to describe what changed since the one before it.
+    private func load() {
+        let versions = model.previousVersions
+        let sets = versions.map { try? SetFile.read(from: $0.url) }
+        rows = versions.indices.map { index in
+            let older = index + 1 < sets.count ? sets[index + 1] : nil
+            let summary = sets[index].map { SetChangeSummary.describe(from: older, to: $0) } ?? "Can't be read"
+            return Row(version: versions[index], summary: summary)
+        }
     }
 }
+
+// MARK: - Timecode field
 
 /// A text field for hh:mm:ss:ff. Valid text is offered to `onCommit` as you
 /// type; text that isn't a timecode, or a value `onCommit` refuses, turns red.
 /// When the value changes elsewhere (capture, undo) the text follows.
 struct TimecodeField: View {
-    /// Shared with the Song list's column header so the two line up.
-    static let width: CGFloat = 110
     let label: String
     let value: Timecode
+    var font: Font = .system(size: 24, weight: .semibold).monospacedDigit()
+    var width: CGFloat = 170
     let onCommit: (Timecode) -> Bool
     @State private var text: String
     @State private var refused = false
 
-    init(_ label: String, value: Timecode, onCommit: @escaping (Timecode) -> Bool) {
+    init(_ label: String, value: Timecode, font: Font = .system(size: 24, weight: .semibold).monospacedDigit(),
+         width: CGFloat = 170, onCommit: @escaping (Timecode) -> Bool) {
         self.label = label
         self.value = value
+        self.font = font
+        self.width = width
         self.onCommit = onCommit
         _text = State(initialValue: value.description)
     }
@@ -488,9 +360,10 @@ struct TimecodeField: View {
             }
         ), prompt: Text("hh:mm:ss:ff"))
         .labelsHidden()
-        .font(.system(.body, design: .monospaced))
-        .foregroundColor(Timecode(text) == nil || refused ? .red : .primary)
-        .frame(width: TimecodeField.width)
+        .textFieldStyle(.roundedBorder)
+        .font(font)
+        .foregroundColor(Timecode(text) == nil || refused ? StateColor.alert : .primary)
+        .frame(width: width)
         .onChange(of: value) { newValue in
             text = newValue.description
             refused = false

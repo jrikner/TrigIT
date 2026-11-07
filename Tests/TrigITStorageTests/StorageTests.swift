@@ -139,6 +139,14 @@ final class SetVersionStoreTests: XCTestCase {
         XCTAssertEqual(store.versions(of: SetID(rawValue: 5)).count, 1)
         XCTAssertEqual(store.versions(of: SetID(rawValue: 6)), [])
     }
+
+    func testRemembersVersionsUsedInAShow() throws {
+        let store = SetVersionStore(directory: try temporaryDirectory())
+        try store.save(fullSet(), at: Date(timeIntervalSince1970: 1))
+        let used = try store.save(fullSet(), at: Date(timeIntervalSince1970: 2))
+        store.markUsedInShow(used)
+        XCTAssertEqual(store.versions(of: fullSet().id).map(\.usedInShow), [true, false])
+    }
 }
 
 final class EditHistoryTests: XCTestCase {
