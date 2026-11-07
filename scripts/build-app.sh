@@ -6,7 +6,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 BUNDLE_ID="${TRIGIT_BUNDLE_ID:-com.trigit.TrigIT}"
-VERSION="${TRIGIT_VERSION:-$(git describe --tags --always 2>/dev/null || echo 0.1)}"
+# The version people see (TRIGIT_VERSION, default 1.0) and a build number
+# that goes up with every commit.
+VERSION="${TRIGIT_VERSION:-1.0}"
+BUILD="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
 APP=build/TrigIT.app
 
 swift build -c release --arch arm64 --arch x86_64
@@ -34,7 +37,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleIconName</key><string>AppIcon</string>
     <key>NSAccentColorName</key><string>AccentColor</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$BUILD</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
     <key>NSHighResolutionCapable</key><true/>
