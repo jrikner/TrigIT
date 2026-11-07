@@ -1,24 +1,47 @@
+import AppKit
 import SwiftUI
 import TrigITEngine
 import TrigITProtocols
+import UniformTypeIdentifiers
 
 /// The Song list, with the selected Song's Start Actions below it.
 struct SetEditorView: View {
     @EnvironmentObject private var model: ShowModel
     @State private var selection: SongID?
+    @State private var importReport: ImportSummary?
 
     var body: some View {
         VSplitView {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(model.set.name).font(.headline)
+                    if model.isShowLocked {
+                        Label("Locked", systemImage: "lock.fill").foregroundColor(.orange)
+                    }
                     Spacer()
+                    Button("Import CSV…") { importCSV() }
                     Button("Add Song") { model.addSong() }
                     Button("Delete") {
                         if let selection { model.deleteSong(selection) }
                         selection = nil
                     }
                     .disabled(selection == nil)
+                }
+                .disabled(model.isShowLocked)
+
+                HStack {
+                    Text("Capture from the Playhead:").foregroundColor(.secondary)
+                    Button("Set start") { if let selection { model.captureStart(for: selection) } }
+                    Button("Set end") { if let selection { model.captureEnd(for: selection) } }
+                    Spacer()
+                }
+                .font(.callout)
+                .disabled(model.isShowLocked || selection == nil || model.playhead == nil)
+
+                if let refused = model.refusedEdit {
+                    Text(refused.message)
+                        .font(.callout)
+                        .foregroundColor(.orange)
                 }
                 HStack {
                     Text("Name").frame(maxWidth: .infinity, alignment: .leading)
@@ -51,6 +74,62 @@ struct SetEditorView: View {
             .padding(8)
             .frame(minHeight: 160)
         }
+        .sheet(item: $importReport) { summary in
+            ImportReportView(summary: summary)
+        }
+    }
+
+    private func importCSV() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.commaSeparatedText, .tabSeparatedText, .plainText]
+        panel.message = "Choose a CSV file with the columns name, start, end (hh:mm:ss:ff)."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let text = (try? String(contentsOf: url, encoding: .utf8))
+                ?? (try? String(contentsOf: url, encoding: .isoLatin1)) else {
+            importReport = ImportSummary(fileName: url.lastPathComponent, report: nil)
+            return
+        }
+        let report = model.importSongs(csv: text, fileName: url.lastPathComponent)
+        importReport = ImportSummary(fileName: url.lastPathComponent, report: report)
+    }
+}
+
+struct ImportSummary: Identifiable {
+    let id = UUID()
+    let fileName: String
+    /// nil if the file couldn't be read.
+    let report: SongImportReport?
+}
+
+struct ImportReportView: View {
+    @Environment(\.dismiss) private var dismiss
+    let summary: ImportSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Import from \(summary.fileName)").font(.headline)
+            if let report = summary.report {
+                Text("Added \(report.imported.count) Song\(report.imported.count == 1 ? "" : "s").")
+                if report.problems.isEmpty {
+                    Text("Every row was imported.").foregroundColor(.secondary)
+                } else {
+                    Text("Skipped \(report.problems.count) row\(report.problems.count == 1 ? "" : "s"):")
+                        .foregroundColor(.orange)
+                    List(report.problems, id: \.self) { problem in
+                        Text("Line \(problem.line): \(problem.reason.description)")
+                    }
+                    .frame(minHeight: 120)
+                }
+            } else {
+                Text("The file could not be read as text.").foregroundColor(.red)
+            }
+            HStack {
+                Spacer()
+                Button("OK") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 420)
     }
 }
 
@@ -76,12 +155,12 @@ struct SongRow: View {
                 TimecodeField(value: song.start) { start in
                     var edited = song
                     edited.start = start
-                    model.update(edited)
+                    return model.update(edited)
                 }
                 TimecodeField(value: song.end) { end in
                     var edited = song
                     edited.end = end
-                    model.update(edited)
+                    return model.update(edited)
                 }
             }
             HStack {
@@ -98,6 +177,14 @@ struct SongRow: View {
         }
         .padding(.vertical, 2)
         .fontWeight(isCurrent ? .bold : .regular)
+        .background(isInConflict ? Color.orange.opacity(0.25) : Color.clear)
+        .disabled(model.isShowLocked)
+    }
+
+    /// Part of the last refused edit: the Song being edited or one in its way.
+    private var isInConflict: Bool {
+        guard let refused = model.refusedEdit else { return false }
+        return refused.songID == song.id || refused.conflicts.contains(song.id)
     }
 }
 
@@ -113,7 +200,7 @@ struct StartActionsEditor: View {
                 Text("Start Actions: \(song.name)").font(.headline)
                 Spacer()
                 Button("Add OSC Action") { model.addOSCAction(to: song.id) }
-                    .disabled(model.set.destinations.isEmpty)
+                    .disabled(model.set.destinations.isEmpty || model.isShowLocked)
             }
             if model.set.destinations.isEmpty {
                 Text("Add a Destination first (Destinations tab).")
@@ -125,10 +212,12 @@ struct StartActionsEditor: View {
             List {
                 ForEach(song.startActions) { action in
                     ActionRow(songID: song.id, action: action)
+                        .disabled(model.isShowLocked)
                 }
-                .onMove { offsets, destination in
+                // No dragging to reorder while Show Lock is on.
+                .onMove(perform: model.isShowLocked ? nil : { offsets, destination in
                     model.moveActions(in: song.id, from: offsets, to: destination)
-                }
+                })
             }
         }
     }

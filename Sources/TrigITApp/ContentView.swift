@@ -54,6 +54,12 @@ struct TopBarView: View {
             .buttonStyle(.plain)
             .help(model.isArmed ? "Click to disarm: timecode is still followed, nothing is sent"
                                 : "Click to arm: Songs send their Actions when entered")
+            Toggle(isOn: Binding(get: { model.isShowLocked }, set: { model.setShowLocked($0) })) {
+                Label("Show Lock", systemImage: model.isShowLocked ? "lock.fill" : "lock.open")
+            }
+            .toggleStyle(.button)
+            .tint(.orange)
+            .help("Make the Set read-only during the show. Arming and the Simulator still work.")
             Spacer()
             Toggle("Fire log", isOn: $showFireLog)
                 .toggleStyle(.button)
@@ -259,13 +265,17 @@ struct FireLogView: View {
     }
 }
 
-/// A text field for hh:mm:ss:ff. Valid text updates the value as you type;
-/// invalid text turns red and is not applied.
+/// A text field for hh:mm:ss:ff. Valid text is offered to `onCommit` as you
+/// type; text that isn't a timecode, or a value `onCommit` refuses, turns red.
+/// When the value changes elsewhere (capture, undo) the text follows.
 struct TimecodeField: View {
-    let onCommit: (Timecode) -> Void
+    let value: Timecode
+    let onCommit: (Timecode) -> Bool
     @State private var text: String
+    @State private var refused = false
 
-    init(value: Timecode, onCommit: @escaping (Timecode) -> Void) {
+    init(value: Timecode, onCommit: @escaping (Timecode) -> Bool) {
+        self.value = value
         self.onCommit = onCommit
         _text = State(initialValue: value.description)
     }
@@ -275,11 +285,17 @@ struct TimecodeField: View {
             get: { text },
             set: { newText in
                 text = newText
-                if let timecode = Timecode(newText) { onCommit(timecode) }
+                if let timecode = Timecode(newText) {
+                    refused = !onCommit(timecode)
+                }
             }
         ))
         .font(.system(.body, design: .monospaced))
-        .foregroundColor(Timecode(text) == nil ? .red : .primary)
+        .foregroundColor(Timecode(text) == nil || refused ? .red : .primary)
         .frame(width: 110)
+        .onChange(of: value) { newValue in
+            text = newValue.description
+            refused = false
+        }
     }
 }

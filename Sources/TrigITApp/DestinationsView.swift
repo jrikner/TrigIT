@@ -12,6 +12,7 @@ struct DestinationsView: View {
                 Text("Destinations").font(.headline)
                 Spacer()
                 Button("Add Destination") { model.addDestination() }
+                    .disabled(model.isShowLocked)
             }
             HStack {
                 Text("Name").frame(width: 120, alignment: .leading)
@@ -27,6 +28,7 @@ struct DestinationsView: View {
             List {
                 ForEach(model.set.destinations) { destination in
                     DestinationRow(destination: destination)
+                        .disabled(model.isShowLocked)
                 }
             }
         }
