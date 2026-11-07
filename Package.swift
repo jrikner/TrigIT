@@ -1,20 +1,26 @@
 // swift-tools-version: 5.9
 import PackageDescription
 
-// The Show Engine is pure Swift with no platform dependencies, so it builds
-// and tests on any platform. The SwiftUI app target only exists on macOS.
+// The Show Engine and the protocol codecs are pure Swift with no platform
+// dependencies, so they build and test on any platform. The SwiftUI app
+// target only exists on macOS.
 var products: [Product] = [
     .library(name: "TrigITEngine", targets: ["TrigITEngine"]),
+    .library(name: "TrigITProtocols", targets: ["TrigITProtocols"]),
 ]
 
 var targets: [Target] = [
-    .target(name: "TrigITEngine"),
+    // Pure encoders and decoders for the show protocols (OSC, MIDI, Art-Net, sACN, LTC).
+    .target(name: "TrigITProtocols"),
+    .testTarget(name: "TrigITProtocolsTests", dependencies: ["TrigITProtocols"]),
+    // The Show Engine: follows timecode and decides what fires. No I/O.
+    .target(name: "TrigITEngine", dependencies: ["TrigITProtocols"]),
     .testTarget(name: "TrigITEngineTests", dependencies: ["TrigITEngine"]),
 ]
 
 #if os(macOS)
 products.append(.executable(name: "TrigIT", targets: ["TrigITApp"]))
-targets.append(.executableTarget(name: "TrigITApp", dependencies: ["TrigITEngine"]))
+targets.append(.executableTarget(name: "TrigITApp", dependencies: ["TrigITEngine", "TrigITProtocols"]))
 #endif
 
 let package = Package(

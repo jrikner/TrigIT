@@ -16,7 +16,10 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root, created lazi
 
 ## Development
 
-- Swift package: `TrigITEngine` (pure Show Engine, no I/O, testable anywhere) and `TrigITApp` (SwiftUI, macOS only, declared only when building on macOS).
+- Swift package:
+  - `TrigITProtocols`: pure encoders/decoders (OSC so far), tested against reference bytes from each protocol's specification.
+  - `TrigITEngine`: the pure Show Engine, no I/O. Emits `.send` events; the app does the sending.
+  - `TrigITApp`: SwiftUI and the hardware/network adapters, macOS only, declared only when building on macOS.
 - Test: `swift test`. Run the app on a Mac: `swift run TrigIT`.
 - Test the engine through its public inputs (timecode readings, Set updates) and outputs (`EngineEvent`s), never its internal state.
 - The Set is `ShowSet` in code because `Set` clashes with the Swift standard library.
