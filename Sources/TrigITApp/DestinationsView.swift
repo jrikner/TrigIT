@@ -33,6 +33,10 @@ struct DestinationsView: View {
                     PortField(destination: destination)
                 }
                 .width(min: 56, ideal: 64, max: 80)
+                TableColumn("Reply Port") { destination in
+                    ReplyPortField(destination: destination)
+                }
+                .width(min: 56, ideal: 72, max: 90)
                 TableColumn("Network Interface") { destination in
                     InterfacePicker(destination: destination, selection: binding(destination, \.networkInterface))
                 }
@@ -110,6 +114,38 @@ struct PortField: View {
         .font(.system(.body, design: .monospaced))
         .foregroundColor(UInt16(text).map { $0 > 0 } == true ? .primary : .red)
         .onChange(of: destination.port) { text = String($0) }
+    }
+}
+
+/// The optional port the device sends OSC replies to; empty for none.
+struct ReplyPortField: View {
+    @EnvironmentObject private var model: ShowModel
+    let destination: Destination
+    @State private var text: String
+
+    init(destination: Destination) {
+        self.destination = destination
+        _text = State(initialValue: destination.replyPort.map(String.init) ?? "")
+    }
+
+    private var isValid: Bool { text.isEmpty || UInt16(text).map { $0 > 0 } == true }
+
+    var body: some View {
+        TextField("None", text: Binding(
+            get: { text },
+            set: { newText in
+                text = newText
+                guard isValid else { return }
+                var edited = destination
+                edited.replyPort = UInt16(newText)
+                model.update(edited)
+            }
+        ))
+        .labelsHidden()
+        .font(.system(.body, design: .monospaced))
+        .foregroundColor(isValid ? .primary : .red)
+        .help("Where the device sends OSC replies (Resolume's OSC output, a grandMA3). A reply marks it online. Leave empty if it sends none.")
+        .onChange(of: destination.replyPort) { text = $0.map(String.init) ?? "" }
     }
 }
 

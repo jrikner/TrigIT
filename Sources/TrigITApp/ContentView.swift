@@ -164,8 +164,9 @@ struct ShowScreenView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let alert = model.alert {
-                TimecodeAlertBanner(text: ShowModel.alertText(alert))
+            let problems = model.alertLines
+            if !problems.isEmpty {
+                TimecodeAlertBanner(text: problems.joined(separator: "\n"))
             }
             HStack {
                 SourceBadge()
@@ -175,6 +176,7 @@ struct ShowScreenView: View {
             }
             SourcePicker()
             SourceHealthView()
+            DestinationStatusView()
 
             Text(model.playhead?.description ?? "--:--:--:--")
                 .font(.system(size: 76, weight: .bold, design: .monospaced))
@@ -198,8 +200,8 @@ struct ShowScreenView: View {
 
 // MARK: - Timecode Source
 
-/// A flashing red banner saying exactly what is wrong with timecode. It goes
-/// away by itself when the engine clears the alert.
+/// A flashing red banner saying exactly what is wrong with timecode and which
+/// Destinations are offline. It goes away by itself when all is fixed.
 struct TimecodeAlertBanner: View {
     let text: String
     @State private var dim = false
@@ -220,6 +222,32 @@ struct TimecodeAlertBanner: View {
                 guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { dim = true }
             }
+    }
+}
+
+/// Each Destination's name and whether it is online, offline or unknown.
+struct DestinationStatusView: View {
+    @EnvironmentObject private var model: ShowModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(model.set.destinations) { destination in
+                let status = model.destinationStatuses[destination.id] ?? .unknown
+                HStack(spacing: 6) {
+                    switch status {
+                    case .online: Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                    case .offline: Image(systemName: "xmark.octagon.fill").foregroundColor(.red)
+                    case .unknown: Image(systemName: "questionmark.circle").foregroundColor(.secondary)
+                    }
+                    Text(destination.name).lineLimit(1)
+                    Text(ShowModel.statusText(status))
+                        .foregroundColor(status.isOffline ? .red : .secondary)
+                        .lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .font(.callout)
     }
 }
 

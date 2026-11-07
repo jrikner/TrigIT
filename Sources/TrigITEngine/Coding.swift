@@ -103,7 +103,7 @@ extension Song: Codable {
 
 extension Destination: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, name, host, port, networkInterface, midiOutput, dmxOutput
+        case id, name, host, port, networkInterface, midiOutput, dmxOutput, replyPort
     }
 
     public init(from decoder: Decoder) throws {
@@ -115,7 +115,8 @@ extension Destination: Codable {
             port: try c.decodeIfPresent(UInt16.self, forKey: .port) ?? 0,
             networkInterface: try c.decodeIfPresent(String.self, forKey: .networkInterface),
             midiOutput: try c.decodeIfPresent(MIDIPortReference.self, forKey: .midiOutput),
-            dmxOutput: try c.decodeIfPresent(DMXOutput.self, forKey: .dmxOutput)
+            dmxOutput: try c.decodeIfPresent(DMXOutput.self, forKey: .dmxOutput),
+            replyPort: try c.decodeIfPresent(UInt16.self, forKey: .replyPort)
         )
     }
 
@@ -128,6 +129,7 @@ extension Destination: Codable {
         try c.encodeIfPresent(networkInterface, forKey: .networkInterface)
         try c.encodeIfPresent(midiOutput, forKey: .midiOutput)
         try c.encodeIfPresent(dmxOutput, forKey: .dmxOutput)
+        try c.encodeIfPresent(replyPort, forKey: .replyPort)
     }
 }
 
