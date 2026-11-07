@@ -71,18 +71,12 @@ struct ShowScreenView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("SIMULATOR")
-                    .font(.headline)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.orange))
-                    .foregroundColor(.black)
-                Text(model.simulator.isPlaying ? "Playing" : "Stopped")
-                    .foregroundColor(.secondary)
+                SourceBadge()
                 Spacer()
                 Text(model.frameRate.map { "\($0.rawValue) fps" } ?? "-- fps")
                     .font(.system(.title3, design: .monospaced))
             }
+            SourcePicker()
 
             Text(model.playhead?.description ?? "--:--:--:--")
                 .font(.system(size: 76, weight: .bold, design: .monospaced))
@@ -99,6 +93,68 @@ struct ShowScreenView: View {
             Spacer(minLength: 0)
         }
         .padding(20)
+    }
+}
+
+// MARK: - Timecode Source
+
+/// Which source is live and whether timecode is arriving from it.
+struct SourceBadge: View {
+    @EnvironmentObject private var model: ShowModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            switch model.source {
+            case .simulator:
+                badge("SIMULATOR", color: .orange)
+                Text(model.simulator.isPlaying ? "Playing" : "Stopped")
+                    .foregroundColor(.secondary)
+            case .ltc:
+                badge("LTC", color: .green)
+                if model.isReceiving {
+                    Text("Receiving").foregroundColor(.secondary)
+                } else {
+                    Text("NO SIGNAL")
+                        .font(.headline)
+                        .foregroundColor(.red)
+                }
+            }
+        }
+    }
+
+    private func badge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.headline)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(color))
+            .foregroundColor(.black)
+    }
+}
+
+struct SourcePicker: View {
+    @EnvironmentObject private var model: ShowModel
+
+    var body: some View {
+        Picker("Timecode Source", selection: Binding(
+            get: { model.source },
+            set: { model.selectSource($0) }
+        )) {
+            Text("Simulator").tag(TimecodeSourceChoice.simulator)
+            ForEach(model.audioInputDevices) { device in
+                ForEach(0..<device.channelCount, id: \.self) { channel in
+                    Text("LTC: \(device.name), channel \(channel + 1)")
+                        .tag(TimecodeSourceChoice.ltc(deviceUID: device.uid, channel: channel))
+                }
+            }
+            // Keep a chosen device that is unplugged visible rather than silently switching.
+            if case .ltc(let uid, let channel) = model.source,
+               !model.audioInputDevices.contains(where: { $0.uid == uid }) {
+                Text("LTC: missing device, channel \(channel + 1)")
+                    .tag(model.source)
+            }
+        }
+        .frame(maxWidth: 420)
     }
 }
 
@@ -139,6 +195,8 @@ struct SimulatorControlsView: View {
             .pickerStyle(.segmented)
         }
         .padding(20)
+        .disabled(model.source != .simulator)
+        .opacity(model.source == .simulator ? 1 : 0.5)
     }
 }
 
