@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import TrigITProtocols
 
-/// Listens for Art-Net packets on UDP port 6454.
+/// Listens for Art-Net packets on UDP port 6454 (or, for Learn, OSC on another port).
 ///
 /// A plain BSD socket rather than Network.framework, because it reliably
 /// receives broadcast packets (Art-Net Timecode is usually broadcast), can
@@ -11,17 +11,17 @@ import TrigITProtocols
 /// interface are dropped by the kernel.
 final class ArtNetTimecodeInput {
     enum StartError: LocalizedError {
-        case socket(call: String, reason: String)
+        case socket(port: UInt16, call: String, reason: String)
         case unknownInterface(String)
 
         /// Captures errno now, before anything else can change it.
-        static func failed(_ call: String) -> StartError {
-            .socket(call: call, reason: String(cString: strerror(errno)))
+        static func failed(_ call: String, port: UInt16) -> StartError {
+            .socket(port: port, call: call, reason: String(cString: strerror(errno)))
         }
 
         var errorDescription: String? {
             switch self {
-            case .socket(let call, let reason): return "could not open UDP port \(artNetPort) (\(call): \(reason))"
+            case .socket(let port, let call, let reason): return "could not open UDP port \(port) (\(call): \(reason))"
             case .unknownInterface(let name): return "network interface \(name) is not available"
             }
         }
@@ -35,10 +35,10 @@ final class ArtNetTimecodeInput {
     private var source: DispatchSourceRead?
 
     /// Starts listening; `interface` is a BSD name such as "en1", or nil for every interface.
-    func start(interface: String?) throws {
+    func start(interface: String?, port: UInt16 = artNetPort) throws {
         stop()
         let fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-        guard fd >= 0 else { throw StartError.failed("socket") }
+        guard fd >= 0 else { throw StartError.failed("socket", port: port) }
         var opened = false
         defer { if !opened { close(fd) } }
 
@@ -46,27 +46,27 @@ final class ArtNetTimecodeInput {
         let size = socklen_t(MemoryLayout<Int32>.size)
         guard setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, size) == 0,
               setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &yes, size) == 0
-        else { throw StartError.failed("setsockopt") }
+        else { throw StartError.failed("setsockopt", port: port) }
 
         if let interface {
             var index = if_nametoindex(interface)
             guard index != 0 else { throw StartError.unknownInterface(interface) }
             guard setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &index, socklen_t(MemoryLayout<UInt32>.size)) == 0
-            else { throw StartError.failed("IP_BOUND_IF") }
+            else { throw StartError.failed("IP_BOUND_IF", port: port) }
         }
 
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = artNetPort.bigEndian
+        address.sin_port = port.bigEndian
         address.sin_addr = in_addr(s_addr: 0) // any address, so broadcasts arrive too
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard bound == 0 else { throw StartError.failed("bind") }
-        guard fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0 else { throw StartError.failed("fcntl") }
+        guard bound == 0 else { throw StartError.failed("bind", port: port) }
+        guard fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0 else { throw StartError.failed("fcntl", port: port) }
 
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         source.setEventHandler { [weak self] in self?.drain(fd) }

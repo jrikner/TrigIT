@@ -164,3 +164,75 @@ extension String {
         }
     }
 }
+
+// MARK: - Decoding
+
+extension OSCMessage {
+    /// Reads an OSC 1.0 packet. A bundle yields its first message. Arguments
+    /// become the three types TrigIT sends: int64 → int (if it fits),
+    /// double → float, symbol → string, true/false → int 1/0; nil and
+    /// impulse are dropped. Returns nil for a malformed packet, an invalid
+    /// address, or a blob or other type TrigIT can't send back.
+    public init?(decoding bytes: [UInt8]) {
+        var reader = OSCReader(bytes: bytes[...])
+        guard let address = reader.string() else { return nil }
+        if address == "#bundle" {
+            // Time tag, then elements: size and content.
+            guard reader.take(8) != nil, let size = reader.int32(), size > 0, let element = reader.take(Int(size)) else { return nil }
+            self.init(decoding: Array(element))
+            return
+        }
+        // OSC 1.0 lets old senders omit the type tag string; treat that as no arguments.
+        let tags = reader.isAtEnd ? "," : reader.string()
+        guard let tags, tags.first == "," else { return nil }
+        var arguments: [OSCArgument] = []
+        for tag in tags.dropFirst() {
+            switch tag {
+            case "i": guard let v = reader.int32() else { return nil }; arguments.append(.int(v))
+            case "f": guard let v = reader.uint32() else { return nil }; arguments.append(.float(Float(bitPattern: v)))
+            case "s", "S": guard let v = reader.string() else { return nil }; arguments.append(.string(v))
+            case "h":
+                guard let high = reader.uint32(), let low = reader.uint32(),
+                      let v = Int32(exactly: Int64(bitPattern: UInt64(high) << 32 | UInt64(low))) else { return nil }
+                arguments.append(.int(v))
+            case "d":
+                guard let high = reader.uint32(), let low = reader.uint32() else { return nil }
+                arguments.append(.float(Float(Double(bitPattern: UInt64(high) << 32 | UInt64(low)))))
+            case "T": arguments.append(.int(1))
+            case "F": arguments.append(.int(0))
+            case "N", "I": continue
+            default: return nil
+            }
+        }
+        self.init(address: address, arguments: arguments)
+        guard hasValidAddress else { return nil }
+    }
+}
+
+private struct OSCReader {
+    var bytes: ArraySlice<UInt8>
+
+    var isAtEnd: Bool { bytes.isEmpty }
+
+    mutating func take(_ count: Int) -> ArraySlice<UInt8>? {
+        guard count >= 0, bytes.count >= count else { return nil }
+        defer { bytes = bytes.dropFirst(count) }
+        return bytes.prefix(count)
+    }
+
+    mutating func uint32() -> UInt32? {
+        take(4)?.reduce(0) { $0 << 8 | UInt32($1) }
+    }
+
+    mutating func int32() -> Int32? {
+        uint32().map { Int32(bitPattern: $0) }
+    }
+
+    /// A null-terminated string padded to a multiple of 4 bytes.
+    mutating func string() -> String? {
+        guard let end = bytes.firstIndex(of: 0) else { return nil }
+        let length = end - bytes.startIndex
+        let text = String(decoding: bytes.prefix(length), as: UTF8.self)
+        return take((length / 4 + 1) * 4) == nil ? nil : text
+    }
+}
