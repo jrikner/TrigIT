@@ -267,6 +267,13 @@ struct SongRow: View {
 struct SongTriggersEditor: View {
     @EnvironmentObject private var model: ShowModel
     let song: Song
+    @State private var learningNote: NoteField?
+
+    enum NoteField: String, Identifiable {
+        case start = "Start Note", stop = "Stop Note"
+        var id: Self { self }
+        var keyPath: WritableKeyPath<Song, NoteTrigger?> { self == .start ? \.startNote : \.stopNote }
+    }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -285,15 +292,35 @@ struct SongTriggersEditor: View {
                 return model.update(edited)
             }
             .help("Its Note On makes the Song Enter: sends its Start Actions and makes it current, even with no timecode")
+            learnButton(.start)
             NoteTriggerField(label: "Stop Note", value: song.stopNote) { note in
                 var edited = song
                 edited.stopNote = note
                 return model.update(edited)
             }
             .help("Its Note On Ends the Song if it is current. With no span and no Start Note, it sends the Stop Actions every time")
+            learnButton(.stop)
             Spacer()
         }
         .font(.callout)
+        .sheet(item: $learningNote) { field in
+            LearnSheet(title: "Learn the \(field.rawValue)",
+                       hint: "Send a Note On from any of these MIDI inputs. Its channel and note become the \(field.rawValue).",
+                       listensForOSC: false) { midi, _ in
+                guard let trigger = midi.flatMap(Learn.noteTrigger(from:)), var edited = model.song(song.id) else { return false }
+                edited[keyPath: field.keyPath] = trigger
+                model.update(edited)
+                return true
+            }
+            .environmentObject(model)
+        }
+    }
+
+    private func learnButton(_ field: NoteField) -> some View {
+        Button("Learn") { learningNote = field }
+            .controlSize(.small)
+            .help("Set the \(field.rawValue) from the next Note On")
+            .accessibilityLabel("Learn \(field.rawValue)")
     }
 }
 
@@ -364,6 +391,7 @@ struct ActionsEditor: View {
     let song: Song
     @State private var list: ShowModel.ActionList = .start
     @State private var showingPresets = false
+    @State private var learning = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -383,6 +411,7 @@ struct ActionsEditor: View {
                     }
                     Divider()
                     Button("From Resolume or grandMA3 preset…") { showingPresets = true }
+                    Button("Learn from MIDI or OSC…") { learning = true }
                 }
                 .fixedSize()
                 .disabled(model.set.destinations.isEmpty || model.isShowLocked)
@@ -436,6 +465,17 @@ struct ActionsEditor: View {
         }
         .sheet(isPresented: $showingPresets) {
             PresetSheet { model.addAction($0, to: song.id, list: list) }
+        }
+        .sheet(isPresented: $learning) {
+            LearnSheet(title: "Learn an Action",
+                       hint: "Send a Note On, an MSC GO, STOP or RESUME, or an OSC message to this Mac. The first one becomes a new Action; then pick its Destination.",
+                       listensForOSC: true) { midi, packet in
+                guard let message = midi.flatMap(Learn.actionMessage(from:)) ?? packet.flatMap(Learn.actionMessage(fromOSC:))
+                else { return false }
+                model.addAction(message, to: song.id, list: list)
+                return true
+            }
+            .environmentObject(model)
         }
     }
 }

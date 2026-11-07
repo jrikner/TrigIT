@@ -340,7 +340,11 @@ final class ShowModel: ObservableObject {
 
     /// Adds the ordinary Action a Resolume or grandMA3 preset fills in.
     func addAction(_ preset: ActionPreset, to songID: SongID, list: ActionList) {
-        let message = preset.message
+        addAction(preset.message, to: songID, list: list)
+    }
+
+    /// Adds an OSC or MIDI Action, such as one Learn captured.
+    func addAction(_ message: Action.Message, to songID: SongID, list: ActionList) {
         addAction(message, to: songID, list: list) { !message.isMIDI || $0.midiOutput != nil }
     }
 

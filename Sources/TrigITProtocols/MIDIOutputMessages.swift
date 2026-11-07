@@ -71,6 +71,19 @@ public struct MSCCommand: Hashable, Sendable, Codable {
         Self.isCueNumber(cue, allowEmpty: true) && Self.isCueNumber(list, allowEmpty: true) && (list.isEmpty || !cue.isEmpty)
     }
 
+    /// Reads an MSC GO, STOP or RESUME from a complete SysEx message (F0 ... F7).
+    /// Returns nil for any other SysEx or command, or a cue or list that isn't
+    /// a cue number. Anything after the list (a cue path) is ignored.
+    public init?(sysEx bytes: [UInt8]) {
+        guard bytes.count >= 7, bytes.first == 0xF0, bytes.last == 0xF7, bytes[1] == 0x7F, bytes[3] == 0x02,
+              let command = Command(rawValue: bytes[5]) else { return nil }
+        let fields = bytes[6..<(bytes.count - 1)].split(separator: 0x00, omittingEmptySubsequences: false)
+            .map { String(decoding: $0, as: UTF8.self) }
+        self.init(deviceID: bytes[2], commandFormat: bytes[4], command: command,
+                  cue: fields.first ?? "", list: fields.count > 1 ? fields[1] : "")
+        guard isValid else { return nil }
+    }
+
     public var encoded: [UInt8] {
         var bytes: [UInt8] = [0xF0, 0x7F, deviceID, 0x02, commandFormat, command.rawValue]
         if !cue.isEmpty {
