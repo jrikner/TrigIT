@@ -33,6 +33,10 @@ _Avoid_: Pause, halt
 A brief loss of timecode that is not a Stop; it never re-arms a Song.
 _Avoid_: Glitch, loss
 
+**Simulator**:
+A virtual Timecode Source inside the app for programming and testing a Set without real timecode.
+_Avoid_: Test mode, generator
+
 ### Show
 
 **Set**:
