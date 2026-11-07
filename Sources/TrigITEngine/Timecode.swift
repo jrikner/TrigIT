@@ -61,43 +61,22 @@ public struct Timecode: Hashable, Comparable, Sendable, Codable, CustomStringCon
 
 // MARK: - Frame counting
 
-/// Frames in a 24-hour day at each rate, used to wrap positions.
-private func framesPerDay(_ rate: FrameRate) -> Int {
-    switch rate {
-    case .fps2997DropFrame: return 24 * 6 * 17_982 // 2,589,408
-    default: return 24 * 3_600 * rate.nominalFramesPerSecond
-    }
-}
-
 extension Timecode {
     /// The number of frames since 00:00:00:00 at `rate`. Drop-frame timecode
     /// skips frame numbers 0 and 1 at the start of every minute except each
     /// tenth minute, so its frame count is smaller than its field values suggest.
     public func frameIndex(at rate: FrameRate) -> Int {
-        let fps = rate.nominalFramesPerSecond
-        let nominal = ((hours * 60 + minutes) * 60 + seconds) * fps + frames
-        guard rate.isDropFrame else { return nominal }
-        let totalMinutes = hours * 60 + minutes
-        return nominal - 2 * (totalMinutes - totalMinutes / 10)
+        TimecodeFields(hours: hours, minutes: minutes, seconds: seconds, frames: frames).frameIndex(at: rate)
     }
 
     /// The timecode `index` frames after 00:00:00:00 at `rate`, wrapping at 24 hours.
     public init(frameIndex index: Int, rate: FrameRate) {
-        let day = framesPerDay(rate)
-        var n = ((index % day) + day) % day
-        let fps = rate.nominalFramesPerSecond
-        if rate.isDropFrame {
-            // Add back the skipped frame numbers before splitting into fields.
-            let tenMinuteBlocks = n / 17_982
-            let remainder = n % 17_982
-            n += 18 * tenMinuteBlocks + (remainder < 2 ? 0 : 2 * ((remainder - 2) / 1_798))
-        }
-        self.init(
-            hours: n / (3_600 * fps),
-            minutes: (n / (60 * fps)) % 60,
-            seconds: (n / fps) % 60,
-            frames: n % fps
-        )!
+        self.init(TimecodeFields(frameIndex: index, rate: rate))!
+    }
+
+    /// The timecode with the same fields, if they are in range.
+    public init?(_ fields: TimecodeFields) {
+        self.init(hours: fields.hours, minutes: fields.minutes, seconds: fields.seconds, frames: fields.frames)
     }
 }
 

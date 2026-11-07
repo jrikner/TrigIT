@@ -8,6 +8,8 @@ enum TimecodeSourceChoice: Hashable {
     case simulator
     /// LTC on one channel (0-based) of an audio input, remembered by device UID.
     case ltc(deviceUID: String, channel: Int)
+    /// MTC from a MIDI source, remembered by its Core MIDI unique ID.
+    case mtc(sourceID: Int32)
 }
 
 /// Connects the pure Show Engine, the Timecode Sources and the network sender
@@ -35,6 +37,7 @@ final class ShowModel: ObservableObject {
     @Published private(set) var networkInterfaces: [NetworkInterfaceInfo] = []
     @Published private(set) var source: TimecodeSourceChoice = .simulator
     @Published private(set) var audioInputDevices: [AudioInputDevice] = []
+    @Published private(set) var midiSources: [MIDISourceInfo] = []
     /// Whether timecode is arriving from the chosen source right now.
     @Published private(set) var isReceiving = false
 
@@ -42,6 +45,9 @@ final class ShowModel: ObservableObject {
     private let sender = UDPSender()
     private let audioDevices = AudioDeviceList()
     private let ltcInput = LTCAudioInput()
+    private let midiInput = MIDIInput()
+    private var midiParser = MIDIParser()
+    private var mtcDecoder = MTCDecoder()
     private var timer: Timer?
     private var lastFedTimecode: Timecode?
     private var lastReadingTime: Double?
@@ -58,6 +64,10 @@ final class ShowModel: ObservableObject {
         audioDevices.onChange = { [weak self] in self?.audioDevicesChanged() }
         ltcInput.onFrame = { [weak self] frame, time in self?.receive(frame, at: time) }
         audioInputDevices = audioDevices.inputDevices()
+        midiInput.onSourcesChanged = { [weak self] in self?.midiSourcesChanged() }
+        midiInput.onBytes = { [weak self] bytes, time in self?.receiveMIDI(bytes, at: time) }
+        midiSources = midiInput.sources()
+        if let status = midiInput.startError { record("MIDI is unavailable (error \(status))", isError: true) }
         startClock()
     }
 
@@ -157,6 +167,7 @@ final class ShowModel: ObservableObject {
         guard choice != source else { return }
         source = choice
         ltcInput.stop()
+        midiInput.disconnect()
         isReceiving = false
         lastReadingTime = nil
         lastFedTimecode = nil
@@ -166,6 +177,9 @@ final class ShowModel: ObservableObject {
         case .ltc:
             record("Timecode Source: \(sourceLabel(choice))")
             startLTC()
+        case .mtc:
+            record("Timecode Source: \(sourceLabel(choice))")
+            startMTC()
         }
     }
 
@@ -176,6 +190,31 @@ final class ShowModel: ObservableObject {
         case .ltc(let uid, let channel):
             let name = audioInputDevices.first { $0.uid == uid }?.name ?? "missing device"
             return "LTC: \(name), channel \(channel + 1)"
+        case .mtc(let id):
+            return "MTC: \(midiSources.first { $0.uniqueID == id }?.name ?? "missing MIDI source")"
+        }
+    }
+
+    private func startMTC() {
+        guard case .mtc(let id) = source else { return }
+        midiParser = MIDIParser()
+        mtcDecoder = MTCDecoder()
+        if !midiInput.connect(to: id) {
+            record("MTC source is not connected; waiting for it", isError: true)
+        }
+    }
+
+    private func midiSourcesChanged() {
+        midiSources = midiInput.sources()
+        // The chosen source may have come back or gone; reconnect either way.
+        if case .mtc = source { startMTC() }
+    }
+
+    private func receiveMIDI(_ bytes: [UInt8], at time: Double) {
+        guard case .mtc = source else { return }
+        for message in midiParser.parse(bytes) {
+            guard let mtc = mtcDecoder.receive(message), let timecode = Timecode(mtc.fields) else { continue }
+            feed(TimecodeReading(timecode: timecode, frameRate: mtc.frameRate, source: .mtc, timestamp: time))
         }
     }
 
