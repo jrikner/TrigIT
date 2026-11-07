@@ -38,6 +38,19 @@ struct SetEditorView: View {
                 .font(.callout)
                 .disabled(model.isShowLocked || selection == nil || model.playhead == nil)
 
+                HStack {
+                    Text("Stop time:").foregroundColor(.secondary)
+                    Stepper(value: Binding(get: { model.set.stopTime }, set: { model.setStopTime($0) }),
+                            in: ShowSet.stopTimeRange, step: 0.5) {
+                        Text(String(format: "%.1f s", model.set.stopTime))
+                            .font(.system(.body, design: .monospaced))
+                    }
+                    .help("Timecode silent for longer than this counts as a Stop: the current Song ends and re-arms. Shorter gaps are dropouts and never re-fire.")
+                    Spacer()
+                }
+                .font(.callout)
+                .disabled(model.isShowLocked)
+
                 if let refused = model.refusedEdit {
                     Text(refused.message)
                         .font(.callout)
@@ -64,9 +77,9 @@ struct SetEditorView: View {
 
             Group {
                 if let selection, let song = model.song(selection) {
-                    StartActionsEditor(song: song)
+                    ActionsEditor(song: song)
                 } else {
-                    Text("Select a Song to edit its Start Actions")
+                    Text("Select a Song to edit its Actions")
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -144,6 +157,7 @@ struct SongRow: View {
                 Circle()
                     .fill(isCurrent ? Color.green : Color.clear)
                     .frame(width: 8, height: 8)
+                Group {
                 TextField("Name", text: Binding(
                     get: { song.name },
                     set: { name in
@@ -162,9 +176,29 @@ struct SongRow: View {
                     edited.end = end
                     return model.update(edited)
                 }
+                }
+                .disabled(model.isShowLocked)
+
+                // Manual firing works under Show Lock and while disarmed.
+                Button {
+                    model.fire(song.id)
+                } label: {
+                    Image(systemName: "play.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Fire: send this Song's Start Actions now, even if disarmed")
+                Button {
+                    model.fireStop(song.id)
+                } label: {
+                    Image(systemName: "stop.fill")
+                }
+                .buttonStyle(.borderless)
+                .disabled(song.stopActions.isEmpty)
+                .opacity(song.stopActions.isEmpty ? 0.2 : 1)
+                .help("Fire stop: send this Song's Stop Actions now, even if disarmed")
             }
             HStack {
-                Text(song.startActions.isEmpty ? "No Start Actions" : "\(song.startActions.count) Start Action(s)")
+                Text(actionSummary)
                     .font(.caption)
                     .foregroundColor(.secondary)
                 if song.end < song.start {
@@ -178,7 +212,11 @@ struct SongRow: View {
         .padding(.vertical, 2)
         .fontWeight(isCurrent ? .bold : .regular)
         .background(isInConflict ? Color.orange.opacity(0.25) : Color.clear)
-        .disabled(model.isShowLocked)
+    }
+
+    private var actionSummary: String {
+        let start = song.startActions.isEmpty ? "No Start Actions" : "\(song.startActions.count) Start Action(s)"
+        return song.stopActions.isEmpty ? start : start + ", \(song.stopActions.count) Stop Action(s)"
     }
 
     /// Part of the last refused edit: the Song being edited or one in its way.
@@ -188,35 +226,49 @@ struct SongRow: View {
     }
 }
 
-// MARK: - Start Actions
+// MARK: - Actions
 
-struct StartActionsEditor: View {
+/// The selected Song's Start Actions and Stop Actions.
+struct ActionsEditor: View {
     @EnvironmentObject private var model: ShowModel
     let song: Song
+    @State private var list: ShowModel.ActionList = .start
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Start Actions: \(song.name)").font(.headline)
+                Text(song.name).font(.headline)
+                Picker("", selection: $list) {
+                    Text("Start Actions (\(song.startActions.count))").tag(ShowModel.ActionList.start)
+                    Text("Stop Actions (\(song.stopActions.count))").tag(ShowModel.ActionList.stop)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 320)
                 Spacer()
-                Button("Add OSC Action") { model.addOSCAction(to: song.id) }
+                Button("Add OSC Action") { model.addOSCAction(to: song.id, list: list) }
                     .disabled(model.set.destinations.isEmpty || model.isShowLocked)
             }
             if model.set.destinations.isEmpty {
                 Text("Add a Destination first (Destinations tab).")
                     .foregroundColor(.secondary)
             }
-            Text("Sent in this order when the Song is entered. Drag to reorder. Arguments: 1 is an int, 0.5 a float, text a string; \"quote\" strings with spaces.")
+            Text(list == .start
+                 ? "Sent in this order when the Song is entered."
+                 : "Sent in this order when the Song ends: timecode stops inside it, or plays on past its end. Usually empty; for DJ pull-ups.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Text("Drag to reorder. Arguments: 1 is an int, 0.5 a float, text a string; \"quote\" strings with spaces.")
                 .font(.caption)
                 .foregroundColor(.secondary)
             List {
-                ForEach(song.startActions) { action in
+                ForEach(song[keyPath: list.keyPath]) { action in
                     ActionRow(songID: song.id, action: action)
                         .disabled(model.isShowLocked)
                 }
                 // No dragging to reorder while Show Lock is on.
                 .onMove(perform: model.isShowLocked ? nil : { offsets, destination in
-                    model.moveActions(in: song.id, from: offsets, to: destination)
+                    model.moveActions(in: song.id, list: list, from: offsets, to: destination)
                 })
             }
         }

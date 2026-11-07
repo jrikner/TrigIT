@@ -1,3 +1,5 @@
+import TrigITProtocols
+
 /// A virtual Timecode Source for programming and testing a Set without real
 /// timecode. Pure: callers pass in the current monotonic time.
 public struct Simulator: Sendable {

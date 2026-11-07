@@ -172,30 +172,61 @@ final class ShowModel: ObservableObject {
         return report
     }
 
-    // MARK: Start Actions
+    // MARK: Actions
 
-    func addOSCAction(to songID: SongID) {
-        guard !isShowLocked, var song = song(songID), let destination = set.destinations.first else { return }
-        song.startActions.append(Action(destinationID: destination.id, message: .osc(OSCMessage(address: "/"))))
+    /// A Song's two Action lists.
+    enum ActionList: Hashable {
+        case start, stop
+
+        var keyPath: WritableKeyPath<Song, [Action]> {
+            self == .start ? \.startActions : \.stopActions
+        }
+    }
+
+    func addOSCAction(to songID: SongID, list: ActionList) {
+        guard var song = song(songID), let destination = set.destinations.first else { return }
+        song[keyPath: list.keyPath].append(Action(destinationID: destination.id, message: .osc(OSCMessage(address: "/"))))
         update(song)
     }
 
+    /// Replaces the Action with the same ID, in whichever list holds it.
     func update(_ action: Action, in songID: SongID) {
-        guard var song = song(songID), let index = song.startActions.firstIndex(where: { $0.id == action.id }) else { return }
-        song.startActions[index] = action
+        guard var song = song(songID) else { return }
+        for list in [ActionList.start, .stop] {
+            if let index = song[keyPath: list.keyPath].firstIndex(where: { $0.id == action.id }) {
+                song[keyPath: list.keyPath][index] = action
+            }
+        }
         update(song)
     }
 
     func deleteAction(_ actionID: ActionID, in songID: SongID) {
         guard var song = song(songID) else { return }
         song.startActions.removeAll { $0.id == actionID }
+        song.stopActions.removeAll { $0.id == actionID }
         update(song)
     }
 
-    func moveActions(in songID: SongID, from offsets: IndexSet, to destination: Int) {
+    func moveActions(in songID: SongID, list: ActionList, from offsets: IndexSet, to destination: Int) {
         guard var song = song(songID) else { return }
-        song.startActions.move(fromOffsets: offsets, toOffset: destination)
+        song[keyPath: list.keyPath].move(fromOffsets: offsets, toOffset: destination)
         update(song)
+    }
+
+    // MARK: Manual firing (allowed under Show Lock and while disarmed)
+
+    func fire(_ songID: SongID) {
+        apply(engine.fire(songID))
+    }
+
+    func fireStop(_ songID: SongID) {
+        apply(engine.fireStop(songID))
+    }
+
+    // MARK: Stop time
+
+    func setStopTime(_ seconds: Double) {
+        edit { $0.stopTime = seconds }
     }
 
     // MARK: Destinations
@@ -382,6 +413,7 @@ final class ShowModel: ObservableObject {
         if source == .simulator, let reading = simulator.reading(at: now), reading.timecode != lastFedTimecode {
             feed(reading)
         }
+        apply(engine.tick(at: now))
         let receiving = lastReadingTime.map { now - $0 < Self.signalTimeout } ?? false
         if receiving != isReceiving { isReceiving = receiving }
     }
@@ -408,9 +440,26 @@ final class ShowModel: ObservableObject {
             frameRate = rate
         case .currentSongChanged(let id):
             currentSongID = id
-        case .fired(let id):
+        case .fired(let id, let cause):
             let name = song(id)?.name ?? "?"
-            record(isArmed ? "Fired \(name)" : "Fired \(name) (disarmed, nothing sent)")
+            switch cause {
+            case .manual: record("Fired \(name) by hand")
+            case .entering: record(isArmed ? "Fired \(name)" : "Fired \(name) (disarmed, nothing sent)")
+            }
+        case .ended(let id, let cause):
+            let name = song(id)?.name ?? "?"
+            let how: String
+            switch cause {
+            case .stop: how = "timecode stopped"
+            case .playedPastEnd: how = "played past its end"
+            case .manual: how = "Fire stop by hand"
+            }
+            let sends = cause != .manual && !isArmed && !(song(id)?.stopActions.isEmpty ?? true) ? ", disarmed, nothing sent" : ""
+            record("\(name) ended (\(how)\(sends))")
+        case .stopped:
+            record("Timecode stopped")
+        case .dropout(let seconds):
+            record("Timecode dropout: \(Int((seconds * 1000).rounded())) ms gap", isError: true)
         case .send(let outgoing):
             send(outgoing)
         case .missingDestination(let songID, _):
@@ -428,7 +477,12 @@ final class ShowModel: ObservableObject {
         let destination = outgoing.destination
         switch outgoing.action.message {
         case .osc(let message):
-            let summary = "\(songName) → \(destination.name): \(message)"
+            let kind: String
+            switch outgoing.reason {
+            case .entering, .manualFire: kind = ""
+            case .ending, .manualStop: kind = " (Stop Action)"
+            }
+            let summary = "\(songName)\(kind) → \(destination.name): \(message)"
             guard message.hasValidAddress else {
                 record("\(summary) not sent: invalid OSC address", isError: true)
                 return

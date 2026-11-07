@@ -29,13 +29,17 @@ public struct Song: Identifiable, Hashable, Sendable, Codable {
     public var end: Timecode
     /// Sent, in order, on Entering.
     public var startActions: [Action]
+    /// Sent, in order, on Ending. Usually empty; used for DJ pull-ups.
+    public var stopActions: [Action]
 
-    public init(id: SongID = SongID(), name: String, start: Timecode, end: Timecode, startActions: [Action] = []) {
+    public init(id: SongID = SongID(), name: String, start: Timecode, end: Timecode,
+                startActions: [Action] = [], stopActions: [Action] = []) {
         self.id = id
         self.name = name
         self.start = start
         self.end = end
         self.startActions = startActions
+        self.stopActions = stopActions
     }
 
     /// Whether `position` lies inside this Song's span. A Song whose end is
@@ -89,16 +93,26 @@ public struct ShowSet: Hashable, Sendable, Codable {
     public var name: String
     public var songs: [Song]
     public var destinations: [Destination]
+    /// Seconds of silence from the Timecode Source before it counts as a Stop.
+    /// Always within `stopTimeRange`.
+    public var stopTime: Double {
+        didSet { stopTime = min(max(stopTime, Self.stopTimeRange.lowerBound), Self.stopTimeRange.upperBound) }
+    }
 
-    public init(name: String = "Untitled Set", songs: [Song] = [], destinations: [Destination] = []) {
+    public static let defaultStopTime = 2.0
+    public static let stopTimeRange = 0.5...30.0
+
+    public init(name: String = "Untitled Set", songs: [Song] = [], destinations: [Destination] = [],
+                stopTime: Double = ShowSet.defaultStopTime) {
         self.name = name
         self.songs = songs
         self.destinations = destinations
+        self.stopTime = min(max(stopTime, Self.stopTimeRange.lowerBound), Self.stopTimeRange.upperBound)
     }
 
-    /// The Song whose span contains `position`, if any. Overlapping Songs are
-    /// blocked when editing (a later feature); until then the first match in
-    /// list order wins.
+    /// The Song whose span contains `position`, if any. Editing never lets
+    /// spans overlap (see `apply`); if a hand-made Set has overlaps anyway, the
+    /// first match in list order wins.
     public func song(at position: Timecode) -> Song? {
         songs.first { $0.contains(position) }
     }
@@ -109,6 +123,6 @@ public struct ShowSet: Hashable, Sendable, Codable {
 
     /// Whether any Song has an Action sending to the Destination.
     public func isInUse(_ id: DestinationID) -> Bool {
-        songs.contains { song in song.startActions.contains { $0.destinationID == id } }
+        songs.contains { song in (song.startActions + song.stopActions).contains { $0.destinationID == id } }
     }
 }
