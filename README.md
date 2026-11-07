@@ -43,3 +43,7 @@ Pick "Art-Net Timecode: interface" as the Timecode Source. TrigIT listens on UDP
 - **Stop:** no timecode for longer than the Set's Stop time (default 2 s, set above the Song list). Shorter gaps are Dropouts: logged, never re-firing.
 - **Ending:** a Stop while inside a Song, or playing on past its end, sends its Stop Actions once. A Jump out of a Song sends nothing. After a Stop, timecode resuming inside the same Song fires it again.
 - **Manual:** ▶ on a Song sends its Start Actions; ■ sends its Stop Actions. Both work while disarmed and under Show Lock.
+
+## MIDI output
+
+Give a Destination a MIDI output (Destinations tab): a physical port, a network MIDI session or an IAC bus. Its Actions can then be MIDI notes (Note On, then Note Off 100 ms later, released at once on disarm or quit) or MIDI Show Control GO/STOP/RESUME with a cue and list. One Destination can have both a network address for OSC and a MIDI output.

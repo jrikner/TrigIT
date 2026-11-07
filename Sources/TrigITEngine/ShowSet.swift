@@ -49,7 +49,8 @@ public struct Song: Identifiable, Hashable, Sendable, Codable {
     }
 }
 
-/// A named device that Actions are sent to.
+/// A named device that Actions are sent to. It has a network address for
+/// OSC and, optionally, a MIDI output for MIDI Actions; a grandMA3 may use both.
 public struct Destination: Identifiable, Hashable, Sendable, Codable {
     public var id: DestinationID
     public var name: String
@@ -59,20 +60,47 @@ public struct Destination: Identifiable, Hashable, Sendable, Codable {
     /// The BSD name of the network interface to send through (for example
     /// "en1"), or nil to let macOS choose.
     public var networkInterface: String?
+    /// The MIDI output for MIDI Actions, if any.
+    public var midiOutput: MIDIPortReference?
 
-    public init(id: DestinationID = DestinationID(), name: String, host: String, port: UInt16, networkInterface: String? = nil) {
+    public init(id: DestinationID = DestinationID(), name: String, host: String, port: UInt16,
+                networkInterface: String? = nil, midiOutput: MIDIPortReference? = nil) {
         self.id = id
         self.name = name
         self.host = host
         self.port = port
         self.networkInterface = networkInterface
+        self.midiOutput = midiOutput
+    }
+}
+
+/// A MIDI port remembered by its Core MIDI unique ID, with its name so it can
+/// be shown even while unplugged.
+public struct MIDIPortReference: Hashable, Sendable, Codable {
+    public var uniqueID: Int32
+    public var name: String
+
+    public init(uniqueID: Int32, name: String) {
+        self.uniqueID = uniqueID
+        self.name = name
     }
 }
 
 /// One outgoing message a Song sends to one Destination.
 public struct Action: Identifiable, Hashable, Sendable, Codable {
     public enum Message: Hashable, Sendable, Codable {
+        /// Sent over UDP to the Destination's address.
         case osc(OSCMessage)
+        /// Note On, then Note Off, to the Destination's MIDI output.
+        case midiNote(MIDINote)
+        /// MIDI Show Control SysEx to the Destination's MIDI output.
+        case msc(MSCCommand)
+
+        /// Whether it goes out over MIDI rather than the network.
+        public var isMIDI: Bool {
+            if case .osc = self { return false }
+            return true
+        }
     }
 
     public var id: ActionID

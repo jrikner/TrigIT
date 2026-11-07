@@ -88,3 +88,27 @@ final class SendingTests: XCTestCase {
         XCTAssertFalse(ShowSet(destinations: [resolume]).isInUse(resolume.id))
     }
 }
+
+final class MIDIActionSendingTests: XCTestCase {
+    func testMIDIActionsAreSentInOrderWithTheirDestination() {
+        let ma3 = Destination(id: DestinationID(rawValue: 1), name: "MA3", host: "10.0.0.30", port: 8000,
+                              midiOutput: MIDIPortReference(uniqueID: 42, name: "MA3 MIDI"))
+        let note = Action(id: ActionID(rawValue: 1), destinationID: ma3.id, message: .midiNote(MIDINote(channel: 0, note: 60)))
+        let go = Action(id: ActionID(rawValue: 2), destinationID: ma3.id, message: .msc(MSCCommand(cue: "5", list: "1")))
+        let osc = Action(id: ActionID(rawValue: 3), destinationID: ma3.id, message: .osc(OSCMessage(address: "/cmd")))
+        let song = Song(id: SongID(rawValue: 1), name: "A", start: tc("01:00:00:00"), end: tc("01:01:00:00"),
+                        startActions: [note, go, osc])
+        let timeline = Timeline(set: ShowSet(songs: [song], destinations: [ma3]), armed: true)
+        timeline.play(from: "01:00:00:00", frames: 1)
+        XCTAssertEqual(timeline.sends.map(\.action), [note, go, osc])
+        XCTAssertEqual(timeline.sends.first?.destination.midiOutput?.uniqueID, 42)
+        XCTAssertEqual(timeline.sends.map(\.action.message.isMIDI), [true, true, false])
+    }
+
+    func testDestinationsWithMIDIActionsAreInUse() {
+        let ma3 = Destination(name: "MA3", host: "", port: 8000)
+        let song = Song(name: "A", start: tc("01:00:00:00"), end: tc("01:01:00:00"),
+                        stopActions: [Action(destinationID: ma3.id, message: .msc(MSCCommand()))])
+        XCTAssertTrue(ShowSet(songs: [song], destinations: [ma3]).isInUse(ma3.id))
+    }
+}
