@@ -17,7 +17,7 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root, created lazi
 ## Development
 
 - Swift package:
-  - `TrigITProtocols`: pure encoders/decoders (OSC, LTC, MIDI bytes, MTC), tested against reference bytes from each protocol's specification and, for LTC, recordings made with libltc.
+  - `TrigITProtocols`: pure encoders/decoders (OSC, LTC, MIDI bytes, MTC, Art-Net Timecode), tested against reference bytes from each protocol's specification and, for LTC, recordings made with libltc.
   - `TrigITEngine`: the pure Show Engine, no I/O. Emits `.send` events; the app does the sending.
   - `TrigITApp`: SwiftUI and the hardware/network adapters, macOS only, declared only when building on macOS.
 - Test: `swift test`. Run the app on a Mac: `swift run TrigIT`.

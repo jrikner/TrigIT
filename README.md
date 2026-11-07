@@ -25,3 +25,7 @@ Pick "LTC: device, channel" as the Timecode Source on the show screen. macOS ask
 ## MTC input
 
 Pick "MTC: source" as the Timecode Source. Every Core MIDI source is listed: physical ports, network MIDI sessions (set up in Audio MIDI Setup → MIDI Network Setup) and IAC buses (enable "Device is online" for the IAC Driver in Audio MIDI Setup to run on the same Mac as Ableton).
+
+## Art-Net Timecode input
+
+Pick "Art-Net Timecode: interface" as the Timecode Source. TrigIT listens on UDP port 6454 and shares it with other Art-Net software on the same Mac. Choosing an interface means packets arriving on any other interface are ignored.
