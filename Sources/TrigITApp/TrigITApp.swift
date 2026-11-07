@@ -79,5 +79,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Writes any unsaved change before TrigIT quits.
     func applicationWillTerminate(_ notification: Notification) {
         ShowModel.current?.saveNow()
+        ShowModel.markQuitCleanly()
     }
 }
