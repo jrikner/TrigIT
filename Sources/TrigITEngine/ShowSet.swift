@@ -86,47 +86,142 @@ public struct Song: Identifiable, Hashable, Sendable {
     }
 }
 
-/// A named device that Actions are sent to. It has a network address for
-/// OSC and, optionally, a MIDI output for MIDI Actions; a grandMA3 may use both.
+/// A named device that Actions are sent to. It is reached over any mix of
+/// OSC on the network, a MIDI output and DMX (Art-Net or sACN), each switched
+/// on or off; a grandMA3 may use all three. A switched-off transport keeps its
+/// settings so switching it back on restores them, but nothing uses them.
 public struct Destination: Identifiable, Hashable, Sendable {
     public var id: DestinationID
     public var name: String
+    /// Whether OSC Actions go to `host`:`port`.
+    public var usesOSC: Bool
+    /// Whether MIDI Actions go to `midiOutput`.
+    public var usesMIDI: Bool
+    /// Whether DMX pulse Actions go out over `dmxOutput`.
+    public var usesDMX: Bool
     /// IP address or host name.
     public var host: String
     public var port: UInt16
     /// The BSD name of the network interface to send through (for example
     /// "en1"), or nil to let macOS choose.
     public var networkInterface: String?
-    /// The MIDI output for MIDI Actions, if any.
+    /// The MIDI output for MIDI Actions, if one is chosen.
     public var midiOutput: MIDIPortReference?
-    /// How DMX pulse Actions reach this Destination, if any. Uses `host` and
-    /// `networkInterface`, but not `port`: Art-Net and sACN have fixed ports.
+    /// How DMX pulse Actions reach this Destination.
     public var dmxOutput: DMXOutput?
+    /// Where Art-Net and sACN unicast go: a node's own address, or a
+    /// broadcast address such as 2.255.255.255. sACN multicast ignores it.
+    public var dmxHost: String
+    /// The BSD name of the network interface DMX goes out through, or nil to
+    /// let macOS choose. DMX often has a lighting network of its own.
+    public var dmxInterface: String?
+    /// sACN priority, 0...200: receivers take the highest-priority source.
+    public var sacnPriority: UInt8 {
+        didSet { sacnPriority = min(sacnPriority, Self.sacnPriorityRange.upperBound) }
+    }
+    /// The sACN source name receivers show.
+    public var dmxSourceName: String
+    /// How many times a second each universe is sent, within `dmxRefreshRateRange`.
+    public var dmxRefreshRate: Double {
+        didSet { dmxRefreshRate = Self.clampedRate(dmxRefreshRate) }
+    }
     /// The local UDP port the device sends OSC replies to, if it sends any
     /// (Resolume's OSC output, the grandMA3). A reply marks it online.
     public var replyPort: UInt16?
 
+    public static let defaultDMXHost = "2.255.255.255"
+    public static let sacnPriorityRange: ClosedRange<UInt8> = 0...200
+    public static let defaultDMXSourceName = "TrigIT"
+    public static let defaultDMXRefreshRate = 30.0
+    /// DMX512 itself tops out at about 44 frames a second.
+    public static let dmxRefreshRateRange = 1.0...44.0
+
+    private static func clampedRate(_ rate: Double) -> Double {
+        rate.isNaN ? defaultDMXRefreshRate : min(max(rate, dmxRefreshRateRange.lowerBound), dmxRefreshRateRange.upperBound)
+    }
+
+    /// MIDI and DMX are on if their output is given, unless said otherwise.
     public init(id: DestinationID = DestinationID(), name: String, host: String, port: UInt16,
                 networkInterface: String? = nil, midiOutput: MIDIPortReference? = nil, dmxOutput: DMXOutput? = nil,
-                replyPort: UInt16? = nil) {
+                replyPort: UInt16? = nil, usesOSC: Bool = true, usesMIDI: Bool? = nil, usesDMX: Bool? = nil,
+                dmxHost: String = Destination.defaultDMXHost, dmxInterface: String? = nil,
+                sacnPriority: UInt8 = SACNDataPacket.defaultPriority, dmxSourceName: String = Destination.defaultDMXSourceName,
+                dmxRefreshRate: Double = Destination.defaultDMXRefreshRate) {
         self.id = id
         self.name = name
+        self.usesOSC = usesOSC
+        self.usesMIDI = usesMIDI ?? (midiOutput != nil)
+        self.usesDMX = usesDMX ?? (dmxOutput != nil)
         self.host = host
         self.port = port
         self.networkInterface = networkInterface
         self.midiOutput = midiOutput
         self.dmxOutput = dmxOutput
         self.replyPort = replyPort
+        self.dmxHost = dmxHost
+        self.dmxInterface = dmxInterface
+        self.sacnPriority = min(sacnPriority, Self.sacnPriorityRange.upperBound)
+        self.dmxSourceName = dmxSourceName
+        self.dmxRefreshRate = Self.clampedRate(dmxRefreshRate)
+    }
+
+    /// The transports switched on, in the order they are shown.
+    public var transports: [Transport] {
+        Transport.allCases.filter { self[uses: $0] }
+    }
+
+    /// Whether a transport is switched on.
+    public subscript(uses transport: Transport) -> Bool {
+        get {
+            switch transport {
+            case .osc: return usesOSC
+            case .midi: return usesMIDI
+            case .dmx: return usesDMX
+            }
+        }
+        set {
+            switch transport {
+            case .osc: usesOSC = newValue
+            case .midi: usesMIDI = newValue
+            case .dmx:
+                usesDMX = newValue
+                if newValue, dmxOutput == nil { dmxOutput = .artNet }
+            }
+        }
+    }
+
+    /// Whether it has a transport for the message switched on.
+    public func canCarry(_ message: Action.Message) -> Bool {
+        self[uses: message.transport]
+    }
+
+    /// The MIDI output, if MIDI is on and one is chosen.
+    public var activeMIDIOutput: MIDIPortReference? { usesMIDI ? midiOutput : nil }
+
+    /// The DMX protocol, if DMX is on.
+    public var activeDMXOutput: DMXOutput? { usesDMX ? dmxOutput : nil }
+}
+
+/// One way of reaching a Destination.
+public enum Transport: Hashable, Sendable, CaseIterable {
+    case osc, midi, dmx
+
+    public var name: String {
+        switch self {
+        case .osc: return "OSC"
+        case .midi: return "MIDI"
+        case .dmx: return "DMX"
+        }
     }
 }
 
 /// The DMX-over-network protocol a Destination receives pulses with.
 public enum DMXOutput: String, Hashable, Sendable, Codable, CaseIterable {
-    /// Art-Net to `host`: a node's own address, or a broadcast address such as 2.255.255.255.
+    /// Art-Net to `dmxHost`: a node's own address, or a broadcast address such as 2.255.255.255.
     case artNet
     /// sACN to each universe's multicast group (239.255.x.y).
     case sACNMulticast
-    /// sACN straight to `host`.
+    /// sACN straight to `dmxHost`.
     case sACNUnicast
 
     public var name: String {
@@ -168,10 +263,14 @@ public struct Action: Identifiable, Hashable, Sendable {
         case dmxPulse(DMXPulse)
 
         /// Whether it goes out over MIDI rather than the network.
-        public var isMIDI: Bool {
+        public var isMIDI: Bool { transport == .midi }
+
+        /// How it reaches its Destination.
+        public var transport: Transport {
             switch self {
-            case .midiNote, .msc: return true
-            case .osc, .dmxPulse: return false
+            case .osc: return .osc
+            case .midiNote, .msc: return .midi
+            case .dmxPulse: return .dmx
             }
         }
     }

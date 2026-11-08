@@ -103,20 +103,35 @@ extension Song: Codable {
 
 extension Destination: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, name, host, port, networkInterface, midiOutput, dmxOutput, replyPort
+        case id, name, usesOSC, usesMIDI, usesDMX, host, port, networkInterface, midiOutput, replyPort
+        case dmxOutput, dmxHost, dmxInterface, sacnPriority, dmxSourceName, dmxRefreshRate
     }
 
+    /// Files from before the on/off switches load as they behaved: OSC on,
+    /// MIDI and DMX on if their output is set. Files from before DMX had its
+    /// own address and interface use the OSC ones.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        let host = try c.decodeIfPresent(String.self, forKey: .host) ?? ""
+        let networkInterface = try c.decodeIfPresent(String.self, forKey: .networkInterface)
         self.init(
             id: try c.decodeIfPresent(DestinationID.self, forKey: .id) ?? DestinationID(),
             name: try c.decodeIfPresent(String.self, forKey: .name) ?? "",
-            host: try c.decodeIfPresent(String.self, forKey: .host) ?? "",
+            host: host,
             port: try c.decodeIfPresent(UInt16.self, forKey: .port) ?? 0,
-            networkInterface: try c.decodeIfPresent(String.self, forKey: .networkInterface),
+            networkInterface: networkInterface,
             midiOutput: try c.decodeIfPresent(MIDIPortReference.self, forKey: .midiOutput),
             dmxOutput: try c.decodeIfPresent(DMXOutput.self, forKey: .dmxOutput),
-            replyPort: try c.decodeIfPresent(UInt16.self, forKey: .replyPort)
+            replyPort: try c.decodeIfPresent(UInt16.self, forKey: .replyPort),
+            usesOSC: try c.decodeIfPresent(Bool.self, forKey: .usesOSC) ?? true,
+            usesMIDI: try c.decodeIfPresent(Bool.self, forKey: .usesMIDI),
+            usesDMX: try c.decodeIfPresent(Bool.self, forKey: .usesDMX),
+            dmxHost: try c.decodeIfPresent(String.self, forKey: .dmxHost) ?? host,
+            // Written as null for "Automatic", so a missing key means an older file.
+            dmxInterface: c.contains(.dmxInterface) ? try c.decodeIfPresent(String.self, forKey: .dmxInterface) : networkInterface,
+            sacnPriority: try c.decodeIfPresent(UInt8.self, forKey: .sacnPriority) ?? SACNDataPacket.defaultPriority,
+            dmxSourceName: try c.decodeIfPresent(String.self, forKey: .dmxSourceName) ?? Destination.defaultDMXSourceName,
+            dmxRefreshRate: try c.decodeIfPresent(Double.self, forKey: .dmxRefreshRate) ?? Destination.defaultDMXRefreshRate
         )
     }
 
@@ -124,11 +139,19 @@ extension Destination: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
+        try c.encode(usesOSC, forKey: .usesOSC)
+        try c.encode(usesMIDI, forKey: .usesMIDI)
+        try c.encode(usesDMX, forKey: .usesDMX)
         try c.encode(host, forKey: .host)
         try c.encode(port, forKey: .port)
         try c.encodeIfPresent(networkInterface, forKey: .networkInterface)
         try c.encodeIfPresent(midiOutput, forKey: .midiOutput)
         try c.encodeIfPresent(dmxOutput, forKey: .dmxOutput)
+        try c.encode(dmxHost, forKey: .dmxHost)
+        try c.encode(dmxInterface, forKey: .dmxInterface)
+        try c.encode(sacnPriority, forKey: .sacnPriority)
+        try c.encode(dmxSourceName, forKey: .dmxSourceName)
+        try c.encode(dmxRefreshRate, forKey: .dmxRefreshRate)
         try c.encodeIfPresent(replyPort, forKey: .replyPort)
     }
 }

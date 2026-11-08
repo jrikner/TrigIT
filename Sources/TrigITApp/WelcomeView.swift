@@ -319,7 +319,10 @@ struct NewSetSetupView: View {
             destination.name = preset.rawValue
             destination.host = host
             destination.port = port
-            if preset == .grandMA3 { destination.dmxOutput = .artNet }
+            if preset == .grandMA3 {
+                destination[uses: .dmx] = true // Art-Net to the console, as before DMX had its own address
+                destination.dmxHost = host
+            }
             model.update(destination)
         }
         if step == 3 { dismiss() } else { step += 1 }

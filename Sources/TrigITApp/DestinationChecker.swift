@@ -24,7 +24,7 @@ final class DestinationChecker {
     private var inputs: (() -> Inputs?)?
     private var onUpdate: (([DestinationID: DestinationStatus], [DestinationStatusChange]) -> Void)?
     private var onListenerError: ((String) -> Void)?
-    private var lastSet = ShowSet()
+    private var lastInputs: Inputs?
 
     private var now: Double { ProcessInfo.processInfo.systemUptime }
 
@@ -43,22 +43,48 @@ final class DestinationChecker {
 
     private func tick() {
         guard let inputs = inputs?() else { return }
-        lastSet = inputs.set
-        if ticks % Int(DestinationMonitor.pingInterval) == 0 { ping(inputs) }
+        lastInputs = inputs
+        if ticks % Int(DestinationMonitor.pingInterval) == 0 {
+            for destination in inputs.set.destinations { ping(destination, inputs) }
+        }
         ticks += 1
         updateListeners(Set(inputs.set.destinations.compactMap(\.replyPort)))
+        publish()
+    }
+
+    /// Recomputes the statuses from the latest inputs and reports them.
+    private func publish() {
+        guard let inputs = lastInputs else { return }
         let changes = monitor.update(inputs.set, interfaces: inputs.interfaces, midiOutputs: inputs.midiOutputs, at: now)
         onUpdate?(monitor.statuses, changes)
     }
 
-    private func ping(_ inputs: Inputs) {
-        for destination in inputs.set.destinations where DestinationMonitor.shouldPing(destination) {
+    /// Pings the Destination now rather than at the next interval, so a Send
+    /// Test settles within about a second.
+    func checkNow(_ destination: Destination) {
+        guard let inputs = lastInputs else { return }
+        ping(destination, inputs)
+    }
+
+    /// A send finished; shows as Sent (not as Reachable) or as its error.
+    func sendFinished(_ id: DestinationID, over transport: Transport, error: String?) {
+        monitor.sendFinished(id, over: transport, error: error, at: now)
+        publish()
+    }
+
+    private func ping(_ destination: Destination, _ inputs: Inputs) {
+        for target in DestinationMonitor.pingTargets(of: destination) {
             // A missing interface is already offline; there's nothing to ping through.
-            if let interface = destination.networkInterface, inputs.interfaces?.contains(interface) == false { continue }
+            if let interface = target.networkInterface, inputs.interfaces?.contains(interface) == false { continue }
             let id = destination.id
-            Pinger.ping(destination.host, interface: destination.networkInterface) { [weak self] answered in
+            Pinger.ping(target.host, interface: target.networkInterface) { [weak self] answered in
                 guard let self else { return }
-                if answered { self.monitor.pingAnswered(id, at: self.now) } else { self.monitor.pingFailed(id, at: self.now) }
+                if answered {
+                    self.monitor.pingAnswered(id, host: target.host, at: self.now)
+                } else {
+                    self.monitor.pingFailed(id, host: target.host, at: self.now)
+                }
+                self.publish()
             }
         }
     }
@@ -100,7 +126,9 @@ final class DestinationChecker {
                 let address = "\(host)".split(separator: "%").first.map(String.init) ?? ""
                 Task { @MainActor in
                     guard let self else { return }
-                    self.monitor.replyReceived(onPort: port, from: address, in: self.lastSet, at: self.now)
+                    guard let set = self.lastInputs?.set else { return }
+                    self.monitor.replyReceived(onPort: port, from: address, in: set, at: self.now)
+                    self.publish()
                 }
             }
             if error == nil { self?.receive(on: connection, port: port) }

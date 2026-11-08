@@ -374,11 +374,7 @@ final class ShowModel: ObservableObject {
 
         /// Whether a Destination has what this kind of Action needs.
         func canUse(_ destination: Destination) -> Bool {
-            switch self {
-            case .osc: return true
-            case .midiNote, .msc: return destination.midiOutput != nil
-            case .dmxPulse: return destination.dmxOutput != nil
-            }
+            destination.canCarry(message)
         }
     }
 
@@ -393,13 +389,13 @@ final class ShowModel: ObservableObject {
 
     /// Adds an OSC or MIDI Action, such as one Learn captured.
     func addAction(_ message: Action.Message, to songID: SongID, list: ActionList) {
-        addAction(message, to: songID, list: list) { !message.isMIDI || $0.midiOutput != nil }
+        addAction(message, to: songID, list: list) { $0.canCarry(message) }
     }
 
     private func addAction(_ message: Action.Message, to songID: SongID, list: ActionList,
                            canUse: (Destination) -> Bool) {
         guard var song = song(songID) else { return }
-        // Prefer a Destination that can carry it: a MIDI output for MIDI, DMX for pulses.
+        // Prefer a Destination that can carry it: MIDI on for MIDI, DMX on for pulses.
         let destination = set.destinations.first(where: canUse) ?? set.destinations.first
         guard let destination else { return }
         song[keyPath: list.keyPath].append(Action(destinationID: destination.id, message: message))
@@ -493,7 +489,11 @@ final class ShowModel: ObservableObject {
     static func statusText(_ status: DestinationStatus) -> String {
         switch status {
         case .unknown: return "unknown"
-        case .online: return "online"
+        case .sent: return "sent, no answer yet"
+        case .online(.responding): return "online, responding"
+        case .online(.hostAnswers): return "online, host answers"
+        case .online(.midiOutputConnected): return "online, MIDI output connected"
+        case .offline(.sendFailed(let error)): return "offline, send failed: \(error)"
         case .offline(.notResponding): return "offline, not responding"
         case .offline(.interfaceMissing(let name)): return "offline, network interface \(name) is gone"
         case .offline(.midiOutputMissing(let name)): return "offline, MIDI output \(name) is gone"
@@ -894,11 +894,15 @@ final class ShowModel: ObservableObject {
             let result = SendResult(date: Date(), timecode: timecode, ok: error == nil, errorText: error)
             if let actionID { self.sendResults[actionID] = result }
             self.destinationSends[destination.id] = result
+            self.destinationChecker.sendFinished(destination.id, over: message.transport, error: error)
             if let error {
                 self.record("\(summary) failed: \(error)", timecode: timecode, kind: .failed)
             } else {
                 self.record(summary, timecode: timecode, kind: .sent)
             }
+        }
+        guard destination.canCarry(message) else {
+            return finish("\(message.transport.name) is off for \(destination.name)")
         }
         switch message {
         case .osc(let message):
@@ -922,7 +926,7 @@ final class ShowModel: ObservableObject {
     }
 
     private func sendMIDI(to destination: Destination, _ finish: (String?) -> Void, _ send: (MIDIPortReference) throws -> Void) {
-        guard let output = destination.midiOutput else {
+        guard let output = destination.activeMIDIOutput else {
             return finish("\(destination.name) has no MIDI output")
         }
         do {
@@ -933,20 +937,20 @@ final class ShowModel: ObservableObject {
         }
     }
 
-    /// Sends a test OSC message to a Destination, for New Set setup.
+    /// Sends a test OSC message to a Destination and pings it at once, so its
+    /// status settles within about a second.
+    /// Only what is on is tested: no OSC message if OSC is off.
     func testDestination(_ destination: Destination) {
-        deliver(.osc(OSCMessage(address: "/trigit/test")), actionID: nil, to: destination,
-                summary: "Test: \(destination.name)")
+        if destination.usesOSC {
+            deliver(.osc(OSCMessage(address: "/trigit/test")), actionID: nil, to: destination,
+                    summary: "Test: \(destination.name)")
+        }
+        destinationChecker.checkNow(destination)
     }
 
-    /// Whether a Destination is Reachable, No reply or Idle: the ping monitor
-    /// says offline, or the last send to it failed, is No reply.
-    enum Reachability { case reachable, noReply, idle }
-
-    func reachability(of id: DestinationID) -> Reachability {
-        if destinationStatuses[id]?.isOffline == true || destinationSends[id]?.ok == false { return .noReply }
-        if destinationStatuses[id] == .online || destinationSends[id]?.ok == true { return .reachable }
-        return .idle
+    /// The Destination's status from the checks and its sends (see `DestinationMonitor`).
+    func reachability(of id: DestinationID) -> DestinationStatus {
+        destinationStatuses[id] ?? .unknown
     }
 
     /// The Show screen's status bar line about the last firing, and whether

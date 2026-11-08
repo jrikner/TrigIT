@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TrigITEngine
 
 /// The type scale: larger than macOS defaults, so the show reads from FOH.
 enum TrigType {
@@ -276,20 +277,25 @@ struct SendStatusBlock: View {
     }
 }
 
-extension ShowModel.Reachability {
+extension DestinationStatus {
     var color: Color {
         switch self {
-        case .reachable: return StateColor.ok
-        case .noReply: return StateColor.alert
-        case .idle: return StateColor.idle
+        case .online: return StateColor.ok
+        case .offline: return StateColor.alert
+        case .unknown, .sent: return StateColor.idle
         }
     }
 
+    /// Worded for what it proves: a send proves nothing, a ping only that the
+    /// host is there, an OSC reply that the app is answering.
     var word: String {
         switch self {
-        case .reachable: return "Reachable"
-        case .noReply: return "No reply"
-        case .idle: return "Idle"
+        case .unknown: return "Idle"
+        case .sent: return "Sent, no answer yet"
+        case .online(.responding): return "Responding"
+        case .online(.hostAnswers): return "Reachable"
+        case .online(.midiOutputConnected): return "MIDI output connected"
+        case .offline: return "No reply"
         }
     }
 }

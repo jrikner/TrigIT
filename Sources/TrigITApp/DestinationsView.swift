@@ -62,11 +62,11 @@ struct DestinationsView: View {
             StateDot(color: state.color)
             VStack(alignment: .leading, spacing: 3) {
                 Text(destination.name).font(TrigType.rowTitle).lineLimit(1)
-                Text(destination.transports).font(TrigType.secondary).foregroundColor(.secondary).lineLimit(1)
+                Text(destination.transportSummary).font(TrigType.secondary).foregroundColor(.secondary).lineLimit(1)
             }
             Spacer()
-            if state != .reachable {
-                Text(state.word).font(TrigType.secondary).foregroundColor(state == .noReply ? StateColor.alert : .secondary)
+            if case .online = state {} else {
+                Text(state.word).font(TrigType.secondary).foregroundColor(state.isOffline ? StateColor.alert : .secondary)
             }
         }
         .padding(.vertical, 6)
@@ -76,9 +76,17 @@ struct DestinationsView: View {
 }
 
 extension Destination {
-    /// "OSC 10.0.0.21:7000, IAC Bus 1, Art-Net"
-    var transports: String {
-        (["OSC \(host):\(port)"] + [midiOutput?.name, dmxOutput?.name].compactMap { $0 }).joined(separator: ", ")
+    /// What is switched on: "OSC 10.0.0.21:7000, IAC Bus 1, Art-Net".
+    var transportSummary: String {
+        transports.map { transport in
+            switch transport {
+            case .osc: return "OSC \(host):\(port)"
+            case .midi: return midiOutput?.name ?? "MIDI (no output)"
+            case .dmx:
+                guard let output = dmxOutput else { return "DMX" }
+                return output == .sACNMulticast ? output.name : "\(output.name) \(dmxHost)"
+            }
+        }.joined(separator: ", ")
     }
 }
 
@@ -95,8 +103,7 @@ struct DestinationDetail: View {
                         .font(TrigType.pageTitle)
                     status
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    GroupHeader("Network (OSC)")
+                section("Network (OSC)", .osc) {
                     GroupedBox {
                         FormRow(label: "Address") {
                             TextField("IP address", text: binding(\.host))
@@ -110,38 +117,83 @@ struct DestinationDetail: View {
                         FormRow(label: "Reply port") { ReplyPortField(destination: destination) }
                         RowDivider()
                         FormRow(label: "Network interface") {
-                            InterfacePicker(destination: destination, selection: binding(\.networkInterface)).frame(width: 260)
+                            InterfacePicker(selection: binding(\.networkInterface)).frame(width: 260)
                         }
                     }
-                    Footnote("A reply on the reply port marks the Destination Reachable. Leave it empty if the device sends none.")
+                    Footnote("A reply on the reply port shows the Destination as Responding. Leave it empty if the device sends none.")
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    GroupHeader("MIDI")
+                section("MIDI", .midi) {
                     GroupedBox {
                         FormRow(label: "Output") {
                             MIDIOutputPicker(destination: destination, selection: binding(\.midiOutput)).frame(width: 260)
                         }
                     }
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    GroupHeader("DMX")
+                section("DMX", .dmx) {
+                    let output = destination.dmxOutput ?? .artNet
                     GroupedBox {
                         FormRow(label: "Protocol") {
                             Picker("DMX output", selection: binding(\.dmxOutput)) {
-                                Text("None").tag(DMXOutput?.none)
                                 ForEach(DMXOutput.allCases, id: \.self) { Text($0.name).tag(DMXOutput?.some($0)) }
                             }
                             .pickerStyle(.segmented)
                             .labelsHidden()
                             .fixedSize()
                         }
+                        if output != .sACNMulticast {
+                            RowDivider()
+                            FormRow(label: "Address") {
+                                TextField(output == .artNet ? "IP or broadcast address" : "IP address", text: binding(\.dmxHost))
+                                    .textFieldStyle(TrigFieldStyle())
+                                    .font(TrigType.body.monospacedDigit())
+                                    .frame(width: 220)
+                            }
+                        }
+                        RowDivider()
+                        FormRow(label: "Network interface") {
+                            InterfacePicker(selection: binding(\.dmxInterface)).frame(width: 260)
+                        }
+                        if output != .artNet {
+                            RowDivider()
+                            FormRow(label: "Priority") {
+                                HStack(spacing: 8) {
+                                    TextField("Priority", value: binding(\.sacnPriority), format: .number)
+                                        .textFieldStyle(TrigFieldStyle())
+                                        .font(TrigType.body.monospacedDigit())
+                                        .frame(width: 80)
+                                    Stepper("Priority", value: binding(\.sacnPriority), in: Destination.sacnPriorityRange)
+                                        .labelsHidden()
+                                }
+                                .help("0 to 200, default 100. Receivers take the source with the highest priority.")
+                            }
+                            RowDivider()
+                            FormRow(label: "Source name") {
+                                TextField(Destination.defaultDMXSourceName, text: binding(\.dmxSourceName))
+                                    .textFieldStyle(TrigFieldStyle())
+                                    .frame(width: 220)
+                            }
+                        }
+                        RowDivider()
+                        FormRow(label: "Refresh rate") {
+                            HStack(spacing: 8) {
+                                Text("\(Int(destination.dmxRefreshRate)) Hz")
+                                    .font(TrigType.body.monospacedDigit())
+                                    .frame(width: 60, alignment: .trailing)
+                                Stepper("Refresh rate", value: binding(\.dmxRefreshRate), in: Destination.dmxRefreshRateRange, step: 1)
+                                    .labelsHidden()
+                            }
+                            .help("How many times a second each universe is sent. Default 30.")
+                        }
                     }
-                    Footnote("For pulse Actions. Art-Net goes to the address (a node, or a broadcast address such as 2.255.255.255); sACN multicast ignores it; sACN unicast uses it. Both use the chosen network interface.")
+                    Footnote(output == .sACNMulticast
+                        ? "For pulse Actions. sACN multicast sends each universe to its own group (239.255.x.y) through the chosen interface."
+                        : "For pulse Actions. DMX has its own address and interface, apart from OSC: often a lighting network such as 2.x.x.x or 10.x.x.x.")
                 }
                 HStack(spacing: 16) {
-                    Button("Send Test") { model.testDestination(destination) }
+                    Button(destination.usesOSC ? "Send Test" : "Check Now") { model.testDestination(destination) }
                         .capsuleButton()
-                        .help("Send the OSC message /trigit/test to this Destination")
+                        .help(destination.usesOSC ? "Send the OSC message /trigit/test to this Destination and ping it"
+                                                  : "Check this Destination's status now")
                     Text(usage).font(TrigType.secondary).foregroundColor(.secondary)
                 }
             }
@@ -150,19 +202,41 @@ struct DestinationDetail: View {
         }
     }
 
+    /// A transport's section: its switch in the header, its settings only while it is on.
+    private func section<Content: View>(_ title: String, _ transport: Transport,
+                                        @ViewBuilder content: () -> Content) -> some View {
+        let isOn = destination[uses: transport]
+        let isLast = isOn && destination.transports.count == 1
+        return VStack(alignment: .leading, spacing: 8) {
+            GroupHeader(title: title) {
+                Toggle(title, isOn: binding(\.[uses: transport]))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .disabled(isLast)
+                    .help(isLast ? "At least one of OSC, MIDI and DMX stays on"
+                                 : "Off: \(transport.name) Actions can't use this Destination; its settings are kept but ignored")
+            }
+            if isOn { content() }
+        }
+    }
+
     private var status: some View {
         let state = model.reachability(of: destination.id)
-        let monitor = model.destinationStatuses[destination.id]
         let detail: String = {
-            if case .offline = monitor, let monitor { return ShowModel.statusText(monitor).capitalizedFirst }
-            if let send = model.destinationSends[destination.id] {
-                return send.ok ? "Last send at \(send.date.formatted(date: .omitted, time: .standard))" : (send.errorText ?? "")
+            switch state {
+            case .offline(.sendFailed(let error)): return error.capitalizedFirst
+            case .offline: return ShowModel.statusText(state).capitalizedFirst
+            case .online(.responding): return "An OSC reply arrived on the reply port"
+            case .online(.hostAnswers): return "The host answers pings"
+            case .online(.midiOutputConnected): return ""
+            case .unknown, .sent:
+                guard let send = model.destinationSends[destination.id] else { return "Not heard from yet" }
+                return "Last send at \(send.date.formatted(date: .omitted, time: .standard))"
             }
-            return state == .reachable ? "Responding on the network" : "Not heard from yet"
         }()
         return HStack(spacing: 8) {
             StateDot(color: state.color)
-            Text(state.word).font(TrigType.body).foregroundColor(state == .noReply ? StateColor.alert : .primary)
+            Text(state.word).font(TrigType.body).foregroundColor(state.isOffline ? StateColor.alert : .primary)
             Text(detail).font(TrigType.body).foregroundColor(.secondary)
         }
         .accessibilityElement(children: .combine)
@@ -263,7 +337,6 @@ struct ReplyPortField: View {
 
 struct InterfacePicker: View {
     @EnvironmentObject private var model: ShowModel
-    let destination: Destination
     let selection: Binding<String?>
 
     var body: some View {
@@ -280,7 +353,7 @@ struct InterfacePicker: View {
     /// choice stays visible (and flagged) instead of silently changing.
     private var interfaceChoices: [String] {
         var names = model.networkInterfaces.map(\.name)
-        if let chosen = destination.networkInterface, !names.contains(chosen) {
+        if let chosen = selection.wrappedValue, !names.contains(chosen) {
             names.append(chosen)
         }
         return names

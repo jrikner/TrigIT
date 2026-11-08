@@ -60,7 +60,7 @@ The optional Actions a Song sends on Ending, used for example to tell other gear
 _Avoid_: Exit actions, release, off-cue
 
 **Destination**:
-A named device that Actions are sent to, such as "Resolume" or "MA3", holding its network address and/or MIDI port. Each Action names one Destination.
+A named device that Actions are sent to, such as "Resolume" or "MA3". It is reached over OSC, MIDI and DMX, each switched on or off; at least one is on. Each Action names one Destination, which must have that Action's transport on.
 _Avoid_: Endpoint, target, output, device
 
 **Start Note**:
