@@ -23,10 +23,7 @@ struct DestinationsView: View {
                     } label: { Label("Destination", systemImage: "plus") }
                     Spacer()
                     let inUse = selection.map(model.set.isInUse) ?? false
-                    Button {
-                        if let selection { model.deleteDestination(selection) }
-                        selection = nil
-                    } label: { Label("Delete Destination", systemImage: "minus").labelStyle(.iconOnly) }
+                    Button { deleteSelected() } label: { Label("Delete Destination", systemImage: "minus").labelStyle(.iconOnly) }
                     .disabled(selection == nil || inUse)
                     .help(inUse ? "Used by an Action; remove those Actions first" : "Delete the selected Destination")
                 }
@@ -47,6 +44,16 @@ struct DestinationsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear { if selection == nil { selection = model.set.destinations.first?.id } }
+    }
+
+    /// Asks first; the in-use rule disables the button before it gets here.
+    private func deleteSelected() {
+        guard let selection, let destination = model.set.destination(selection),
+              confirmDelete("Delete \u{201C}\(destination.name)\u{201D}?",
+                            detail: "Its address, ports and MIDI and DMX settings will be deleted.")
+        else { return }
+        model.deleteDestination(selection)
+        self.selection = nil
     }
 
     private func row(_ destination: Destination) -> some View {

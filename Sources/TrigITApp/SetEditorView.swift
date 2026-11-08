@@ -4,6 +4,18 @@ import TrigITEngine
 import TrigITProtocols
 import UniformTypeIdentifiers
 
+/// Asks before a delete. Cancel comes first, so Return and Esc never delete.
+@MainActor
+func confirmDelete(_ message: String, detail: String) -> Bool {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = message
+    alert.informativeText = detail
+    alert.addButton(withTitle: "Cancel")
+    alert.addButton(withTitle: "Delete").hasDestructiveAction = true
+    return alert.runModal() == .alertSecondButtonReturn
+}
+
 /// The Song list on the left, the selected Song's Timing or Actions on the right.
 struct SetEditorView: View {
     @EnvironmentObject private var model: ShowModel
@@ -27,13 +39,13 @@ struct SetEditorView: View {
                         Button("Rename") { rename(id) }.disabled(model.isShowLocked)
                     }
                     if !ids.isEmpty {
-                        Button(ids.count > 1 ? "Delete Songs" : "Delete Song") { ids.forEach(delete) }
+                        Button(ids.count > 1 ? "Delete Songs" : "Delete Song") { delete(Array(ids)) }
                             .disabled(model.isShowLocked)
                     }
                 } primaryAction: { ids in
                     if let id = ids.first, ids.count == 1 { rename(id) }
                 }
-                .onDeleteCommand { if let selection { delete(selection) } }
+                .onDeleteCommand { if let selection, !model.isShowLocked { delete([selection]) } }
                 RowDivider()
                 HStack {
                     Button { if let id = model.addSong() { rename(id) } } label: {
@@ -41,7 +53,7 @@ struct SetEditorView: View {
                     }
                     Button("Import CSV…") { importCSV() }
                     Spacer()
-                    Button { if let selection { delete(selection) } } label: {
+                    Button { if let selection { delete([selection]) } } label: {
                         Label("Delete Song", systemImage: "minus").labelStyle(.iconOnly)
                     }
                     .disabled(selection == nil)
@@ -78,9 +90,25 @@ struct SetEditorView: View {
         renaming = id
     }
 
-    private func delete(_ id: SongID) {
-        model.deleteSong(id)
-        if selection == id { selection = nil }
+    /// Asks first, naming the Songs and the Actions that go with them.
+    private func delete(_ ids: [SongID]) {
+        let songs = ids.compactMap(model.song)
+        guard !songs.isEmpty else { return }
+        let starts = songs.map(\.startActions.count).reduce(0, +)
+        let stops = songs.map(\.stopActions.count).reduce(0, +)
+        func count(_ n: Int, _ kind: String) -> String? { n == 0 ? nil : "\(n) \(kind) Action\(n == 1 ? "" : "s")" }
+        let actions = [count(starts, "Start"), count(stops, "Stop")].compactMap { $0 }.joined(separator: " and ")
+        let one = songs.count == 1
+        guard confirmDelete(
+            one ? "Delete \u{201C}\(songs[0].name)\u{201D}?" : "Delete \(songs.count) Songs?",
+            detail: actions.isEmpty
+                ? (one ? "It has no Actions." : "They have no Actions.")
+                : "\(one ? "Its" : "Their") \(actions) will be deleted too."
+        ) else { return }
+        for song in songs {
+            model.deleteSong(song.id)
+            if selection == song.id { selection = nil }
+        }
     }
 
     private func importCSV() {
