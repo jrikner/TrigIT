@@ -1,0 +1,26 @@
+name: Feature request
+description: Something TrigIT should do
+labels: [needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use TrigIT's terms where they fit (see [GLOSSARY.md](../blob/main/GLOSSARY.md)): **Set**, **Song**, **Action**, **Start Actions** / **Stop Actions**, **Destination**, **Timecode Source**, **Playhead**, **Armed**, **Show Lock**.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The show situation, and where TrigIT gets in the way
+      placeholder: In a festival changeover I need a Song's Start Actions to wait until...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like TrigIT to do?
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How do you work around it today?
