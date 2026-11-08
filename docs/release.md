@@ -20,7 +20,9 @@
 
    It prompts for the app-specific password. Nothing secret goes in the repo or the environment.
 
-3. **Bundle identifier (optional).** The app is `com.trigit.TrigIT` unless you set `TRIGIT_BUNDLE_ID`. Pick it once and keep it: macOS ties microphone permission and saved settings to it.
+3. **Bundle identifier (optional).** The app is `com.ncoab.trigit` unless you set `TRIGIT_BUNDLE_ID`. Keep it: macOS ties microphone permission and saved settings to it.
+
+   Release notes for the first build with `com.ncoab.trigit` must say: builds before it used `com.trigit.TrigIT`, so macOS asks for microphone access again, and the recent Sets list, Learn settings and the sACN source ID start fresh. Rerun `scripts/install-launch-agent.sh` to move the launch agent to the new label; it removes the old one.
 
 ## Each release
 

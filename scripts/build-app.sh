@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BUNDLE_ID="${TRIGIT_BUNDLE_ID:-com.trigit.TrigIT}"
+BUNDLE_ID="${TRIGIT_BUNDLE_ID:-com.ncoab.trigit}"
 # The version people see (TRIGIT_VERSION, default 1.0) and a build number
 # that goes up with every commit.
 VERSION="${TRIGIT_VERSION:-1.0}"
