@@ -101,6 +101,10 @@ final class ShowModel: ObservableObject {
     @Published private(set) var destinationSends: [DestinationID: SendResult] = [:]
     /// Songs that fired since the last Stop or disarm.
     @Published private(set) var firedThisRun: Set<SongID> = []
+    /// The Song timecode or its Start Note entered while disarmed, so nothing
+    /// was sent: it is not shown as playing until it Enters again Armed or is
+    /// sent by hand, even if TrigIT is armed meanwhile.
+    @Published private(set) var unsentSongID: SongID?
     @Published private(set) var lastFiring: Firing?
     /// The last timecode each source sent, for the Timecode screen's readouts.
     @Published private(set) var sourceReadings: [SourceRole: Timecode] = [:]
@@ -757,9 +761,11 @@ final class ShowModel: ObservableObject {
             currentSongID = id
         case .fired(let id, let cause):
             let name = song(id)?.name ?? "?"
-            firedThisRun.insert(id)
+            let sent = isArmed || cause == .manual
+            if sent { firedThisRun.insert(id) }
+            unsentSongID = sent ? nil : id
             lastFiring = Firing(songID: id, date: Date(), actionIDs: song(id)?.startActions.map(\.id) ?? [],
-                                sent: isArmed || cause == .manual)
+                                sent: sent)
             switch cause {
             case .manual: record("Fired \(name) by hand", kind: .fired)
             case .entering, .note:

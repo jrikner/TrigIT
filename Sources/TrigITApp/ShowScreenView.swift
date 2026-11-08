@@ -81,7 +81,8 @@ struct ShowScreenView: View {
 
 /// The big Playhead. Green: rolling inside a Song. Orange: rolling between
 /// Songs. Flashing red: timecode stopped or was lost after rolling (no flash
-/// with Reduce Motion). Gray: no timecode yet.
+/// with Reduce Motion). Gray: no timecode yet. While disarmed and rolling it
+/// pulses slowly in its green or orange, with "Disarmed" beside it.
 struct PlayheadText: View {
     @EnvironmentObject private var model: ShowModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -95,27 +96,53 @@ struct PlayheadText: View {
         return model.set.songs.contains { $0.contains(playhead) } ? .inSong : .betweenSongs
     }
 
-    var body: some View {
-        let state = state
-        Text(model.playhead?.description ?? "00:00:00:00")
-            .font(TrigType.playhead)
-            .tracking(-2)
-            .lineLimit(1)
-            .minimumScaleFactor(0.3)
-            .foregroundColor(color(state))
-            .opacity(state == .stopped && dim ? 0.35 : 1)
-            .accessibilityLabel("Playhead \(model.playhead?.description ?? "none")")
-            .accessibilityValue(word(state))
-            .onChange(of: state == .stopped) { flash($0) }
-            .onAppear { flash(state == .stopped) }
+    /// Rolling, but nothing is sent.
+    private var rollingDisarmed: Bool {
+        !model.isArmed && (state == .inSong || state == .betweenSongs)
     }
 
-    private func flash(_ on: Bool) {
-        guard on, !reduceMotion else {
-            withAnimation(nil) { dim = false }
-            return
+    /// Which animation runs: the Stopped flash, the slower disarmed pulse, or none.
+    private enum Pulse { case stopped, disarmed }
+
+    private var pulse: Pulse? {
+        state == .stopped ? .stopped : rollingDisarmed ? .disarmed : nil
+    }
+
+    var body: some View {
+        let state = state
+        let pulse = pulse
+        HStack(alignment: .firstTextBaseline, spacing: 20) {
+            Text(model.playhead?.description ?? "00:00:00:00")
+                .font(TrigType.playhead)
+                .tracking(-2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.3)
+                .foregroundColor(color(state))
+                .opacity(dim ? (pulse == .stopped ? 0.35 : 0.6) : 1)
+            if rollingDisarmed {
+                Label("Disarmed", systemImage: "bolt.slash")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .fixedSize()
+            }
         }
-        withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { dim = true }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Playhead \(model.playhead?.description ?? "none")")
+        .accessibilityValue(rollingDisarmed ? "\(word(state)), disarmed" : word(state))
+        .onChange(of: pulse) { animate($0) }
+        .onAppear { animate(pulse) }
+    }
+
+    private func animate(_ pulse: Pulse?) {
+        withAnimation(nil) { dim = false }
+        guard let pulse, !reduceMotion else { return }
+        // The disarmed pulse is slower and shallower than the Stopped flash.
+        // Start on the next turn, so a running pulse of the other kind stops first.
+        let duration = pulse == .stopped ? 0.5 : 1.2
+        DispatchQueue.main.async {
+            guard self.pulse == pulse else { return }
+            withAnimation(.easeInOut(duration: duration).repeatForever(autoreverses: true)) { dim = true }
+        }
     }
 
     private func color(_ state: State) -> Color {
@@ -170,11 +197,16 @@ struct SetPanel: View {
 
     private func row(_ song: Song) -> some View {
         let isCurrent = song.id == model.currentSongID
+        // Current, but entered while disarmed: nothing was sent, so not playing.
+        let unsent = isCurrent && song.id == model.unsentSongID
+        let isPlaying = isCurrent && !unsent
         let fired = model.firedThisRun.contains(song.id) && !isCurrent
         return HStack(spacing: 10) {
             Group {
-                if isCurrent {
+                if isPlaying {
                     Image(systemName: "play.fill").accessibilityLabel("Current")
+                } else if unsent {
+                    Image(systemName: "bolt.slash").foregroundColor(.secondary).accessibilityLabel("Current")
                 } else if fired {
                     Image(systemName: "checkmark").accessibilityLabel("Fired")
                 } else {
@@ -188,6 +220,11 @@ struct SetPanel: View {
                 .foregroundColor(fired ? .secondary : .primary)
                 .lineLimit(1)
             Spacer()
+            if unsent {
+                Text(model.isArmed ? "Not sent" : "Disarmed")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
             Text(song.hasSpan ? song.start.description : "Start Note")
                 .font(.system(size: 16).monospacedDigit())
                 .foregroundColor(.secondary)
@@ -195,7 +232,9 @@ struct SetPanel: View {
         .padding(.vertical, 13)
         .padding(.horizontal, 10)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(isCurrent ? StateColor.ok.opacity(0.16) : Color.clear))
+            .fill(isPlaying ? StateColor.ok.opacity(0.16) : Color.clear))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(unsent ? Color.secondary.opacity(0.6) : Color.clear, lineWidth: 1.5))
         .accessibilityElement(children: .combine)
     }
 }
