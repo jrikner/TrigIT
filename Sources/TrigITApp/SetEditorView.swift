@@ -106,6 +106,7 @@ struct SongListRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(song.name).font(TrigType.rowTitle).lineLimit(1)
                 Text(subtitle).font(TrigType.secondary.monospacedDigit()).foregroundColor(.secondary).lineLimit(1)
+                Text(actionCounts).font(TrigType.secondary).foregroundColor(.secondary).lineLimit(1)
             }
             Spacer()
             if let problem {
@@ -126,6 +127,13 @@ struct SongListRow: View {
         return "No trigger"
     }
 
+    /// "2 Start Actions, 1 Stop Action", "2 Start Actions" or "No Actions".
+    private var actionCounts: String {
+        func count(_ n: Int, _ kind: String) -> String? { n == 0 ? nil : "\(n) \(kind) Action\(n == 1 ? "" : "s")" }
+        let parts = [count(song.startActions.count, "Start"), count(song.stopActions.count, "Stop")].compactMap { $0 }
+        return parts.isEmpty ? "No Actions" : parts.joined(separator: ", ")
+    }
+
     private var problem: String? {
         if song.hasSpan && song.end < song.start { return "End is before start: this Song never fires" }
         guard let refused = model.refusedEdit, refused.songID == song.id || refused.conflicts.contains(song.id) else { return nil }
@@ -140,71 +148,83 @@ extension NoteTrigger {
     }
 }
 
-/// The selected Song: name, Fire and Stop, then its Timing or Actions.
+/// The selected Song on one page: its name and span switch, then a Start
+/// section and an End section that mirror each other.
 struct SongDetail: View {
     @EnvironmentObject private var model: ShowModel
     let song: Song
     @Binding var renaming: SongID?
-    @SceneStorage("songTab") private var tab = "timing"
     @FocusState private var nameFocused: Bool
     @State private var nameHovered = false
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 12) {
-                    TextField("Song name", text: Binding(get: { song.name }, set: { name in
-                        var edited = song
-                        edited.name = name
-                        model.update(edited)
-                    }))
-                    .textFieldStyle(.plain)
-                    .font(TrigType.pageTitle)
-                    .focused($nameFocused)
-                    .onSubmit { nameFocused = false }
-                    // Looks like a heading until hovered or focused, then like a field.
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(nameFocused || (nameHovered && !model.isShowLocked) ? Surface.selection : .clear)
-                    )
-                    .padding(.horizontal, -6)
-                    .onHover { nameHovered = $0 }
-                    .disabled(model.isShowLocked)
-                    .help(model.isShowLocked ? "Unlock the Show to rename this Song" : "Song name: click to rename")
-                    if !model.isShowLocked {
-                        Image(systemName: "pencil")
-                            .foregroundColor(.secondary)
-                            .opacity(nameHovered || nameFocused ? 1 : 0)
-                            .accessibilityHidden(true)
-                    }
-                    // Manual firing works under Show Lock and while disarmed.
-                    Button { model.fire(song.id) } label: { Label("Fire", systemImage: "play.fill") }
-                        .capsuleButton()
-                        .help("Fire: send this Song's Start Actions now, even if disarmed")
-                    Button { model.fireStop(song.id) } label: { Label("Stop", systemImage: "stop.fill") }
-                        .capsuleButton()
-                        .disabled(song.stopActions.isEmpty)
-                        .help("Stop: send this Song's Stop Actions now, even if disarmed")
+            VStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 12) {
+                    nameField
+                    spanSwitch
                 }
-                Picker("View", selection: $tab) {
-                    Text("Timing").tag("timing")
-                    Text("Actions").tag("actions")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                if tab == "timing" {
-                    SongTimingEditor(song: song)
-                } else {
-                    SongActionsEditor(song: song)
-                }
+                SongSectionsEditor(song: song)
             }
             .padding(EdgeInsets(top: 16, leading: 32, bottom: 28, trailing: 32))
         }
         .onAppear(perform: takeRenameRequest)
         .onChange(of: renaming) { _ in takeRenameRequest() }
+    }
+
+    private var nameField: some View {
+        HStack(spacing: 12) {
+            TextField("Song name", text: Binding(get: { song.name }, set: { name in
+                var edited = song
+                edited.name = name
+                model.update(edited)
+            }))
+            .textFieldStyle(.plain)
+            .font(TrigType.pageTitle)
+            .focused($nameFocused)
+            .onSubmit { nameFocused = false }
+            // Looks like a heading until hovered or focused, then like a field.
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(nameFocused || (nameHovered && !model.isShowLocked) ? Surface.selection : .clear)
+            )
+            .padding(.horizontal, -6)
+            .onHover { nameHovered = $0 }
+            .disabled(model.isShowLocked)
+            .help(model.isShowLocked ? "Unlock the Show to rename this Song" : "Song name: click to rename")
+            if !model.isShowLocked {
+                Image(systemName: "pencil")
+                    .foregroundColor(.secondary)
+                    .opacity(nameHovered || nameFocused ? 1 : 0)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    /// Turns the start time and the end time on together.
+    private var spanSwitch: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Timecode span", isOn: Binding(get: { song.hasSpan }, set: { hasSpan in
+                var edited = song
+                edited.hasSpan = hasSpan
+                model.update(edited)
+            }))
+            .toggleStyle(.switch)
+            .font(TrigType.label)
+            .fixedSize()
+            .disabled(model.isShowLocked)
+            .help("Off: only the notes trigger this Song; its start and end times are kept but ignored")
+            if let refused = model.refusedEdit, refused.songID == song.id || refused.conflicts.contains(song.id) {
+                Label(refused.message, systemImage: "exclamationmark.triangle.fill")
+                    .font(TrigType.secondary)
+                    .foregroundColor(StateColor.caution)
+            } else if song.hasSpan {
+                Footnote("Capture takes the live timecode\(model.playhead.map { ", now \($0)" } ?? "").")
+                    .padding(.horizontal, -4)
+            }
+        }
     }
 
     /// Focusing an AppKit text field selects all its text, so typing replaces "Song N".
@@ -215,12 +235,16 @@ struct SongDetail: View {
     }
 }
 
-// MARK: - Timing
+// MARK: - Start and End
 
-struct SongTimingEditor: View {
+/// The Start section (start time, Start Note, Send Start, Start Actions) and
+/// the End section below it. Told apart by symbol and position, not colour.
+struct SongSectionsEditor: View {
     @EnvironmentObject private var model: ShowModel
     let song: Song
     @State private var learningNote: NoteField?
+    @State private var presetList: ShowModel.ActionList?
+    @State private var learnList: ShowModel.ActionList?
 
     enum NoteField: String, Identifiable {
         case start = "Start Note", stop = "Stop Note"
@@ -229,46 +253,13 @@ struct SongTimingEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 8) {
-                GroupHeader(title: "Timecode span") {
-                    Toggle("Use a timecode span", isOn: Binding(get: { song.hasSpan }, set: { hasSpan in
-                        var edited = song
-                        edited.hasSpan = hasSpan
-                        model.update(edited)
-                    }))
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .help("Off: only the notes trigger this Song; its start and end are kept but ignored")
-                }
-                GroupedBox {
-                    spanRow("Start", value: song.start, keyPath: \.start, capture: { model.captureStart(for: song.id) })
-                    RowDivider()
-                    spanRow("End", value: song.end, keyPath: \.end, capture: { model.captureEnd(for: song.id) })
-                }
-                .disabled(!song.hasSpan)
-                .opacity(song.hasSpan ? 1 : 0.5)
-                if let refused = model.refusedEdit, refused.songID == song.id || refused.conflicts.contains(song.id) {
-                    Label(refused.message, systemImage: "exclamationmark.triangle.fill")
-                        .font(TrigType.secondary)
-                        .foregroundColor(StateColor.caution)
-                        .padding(.horizontal, 4)
-                } else {
-                    Footnote("Capture takes the live timecode\(model.playhead.map { ", now \($0)" } ?? "").")
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                GroupHeader("MIDI triggers")
-                GroupedBox {
-                    noteRow(.start, help: "Its Note On makes the Song Enter: sends its Start Actions and makes it current, even with no timecode")
-                    RowDivider()
-                    noteRow(.stop, help: "Its Note On Ends the Song if it is current. With no span and no Start Note, it sends the Stop Actions every time")
-                }
-                Footnote("Channel 1 to 16 and note 0 to 127. Leave both empty for none.")
+        VStack(alignment: .leading, spacing: 32) {
+            startSection
+            endSection
+            if model.set.destinations.isEmpty {
+                Footnote("Add a Destination first, in Destinations.")
             }
         }
-        .disabled(model.isShowLocked)
         .sheet(item: $learningNote) { field in
             LearnSheet(title: "Learn the \(field.rawValue)",
                        hint: "Send a Note On from any of these MIDI inputs. Its channel and note become the \(field.rawValue).",
@@ -279,90 +270,6 @@ struct SongTimingEditor: View {
                 return true
             }
             .environmentObject(model)
-        }
-    }
-
-    private func spanRow(_ label: String, value: Timecode, keyPath: WritableKeyPath<Song, Timecode>,
-                         capture: @escaping () -> Void) -> some View {
-        FormRow(label: label) {
-            TimecodeField(label, value: value) { timecode in
-                var edited = song
-                edited[keyPath: keyPath] = timecode
-                return model.update(edited)
-            }
-            Button("Capture", action: capture)
-                .capsuleButton()
-                .disabled(model.playhead == nil)
-                .help("Set the \(label.lowercased()) to the live Playhead")
-        }
-        .frame(minHeight: 60)
-    }
-
-    private func noteRow(_ field: NoteField, help: String) -> some View {
-        FormRow(label: field.rawValue) {
-            NoteTriggerField(label: field.rawValue, value: song[keyPath: field.keyPath]) { note in
-                var edited = song
-                edited[keyPath: field.keyPath] = note
-                return model.update(edited)
-            }
-            .help(help)
-            Button("Learn") { learningNote = field }
-                .capsuleButton()
-                .help("Set the \(field.rawValue) from the next Note On")
-                .accessibilityLabel("Learn \(field.rawValue)")
-        }
-    }
-}
-
-// MARK: - Actions
-
-struct SongActionsEditor: View {
-    @EnvironmentObject private var model: ShowModel
-    let song: Song
-    @State private var presetList: ShowModel.ActionList?
-    @State private var learnList: ShowModel.ActionList?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 8) {
-                GroupHeader("When")
-                GroupedBox {
-                    if song.hasSpan {
-                        FormRow(label: "Timecode enters the span") {
-                            Text(song.start.description).font(.system(size: 20, weight: .semibold).monospacedDigit())
-                        }
-                    }
-                    if song.hasSpan && song.startNote != nil { RowDivider() }
-                    if let note = song.startNote {
-                        FormRow(label: "Start Note arrives") {
-                            Text(note.spoken.prefix(1).uppercased() + note.spoken.dropFirst()).foregroundColor(.secondary)
-                        }
-                    }
-                    if !song.hasSpan && song.startNote == nil {
-                        FormRow(label: "Only Fire or the Stop Note") { EmptyView() }
-                    }
-                }
-            }
-            actionGroup(.start, title: "Send", empty: "No Actions yet. Add one to send when this Song starts.")
-            VStack(alignment: .leading, spacing: 8) {
-                GroupHeader("When it ends")
-                GroupedBox {
-                    FormRow(label: song.hasSpan ? "Timecode passes \(song.end) or stops" : "The Stop Note arrives") {
-                        if song.stopActions.isEmpty {
-                            Text("No Stop Actions").foregroundColor(.secondary)
-                        }
-                        addMenu(.stop, label: "Add")
-                    }
-                    ForEach(song.stopActions) { action in
-                        RowDivider()
-                        ActionRow(songID: song.id, list: .stop, action: action)
-                    }
-                }
-                Footnote("Usually empty. Sent when the Playhead passes the end time or the Stop Note arrives, never on a timecode Stop.")
-            }
-            if model.set.destinations.isEmpty {
-                Footnote("Add a Destination first, in Destinations.")
-            }
         }
         .sheet(item: $presetList) { list in
             PresetSheet { model.addAction($0, to: song.id, list: list) }
@@ -380,12 +287,143 @@ struct SongActionsEditor: View {
         }
     }
 
-    private func actionGroup(_ list: ShowModel.ActionList, title: String, empty: String) -> some View {
+    // MARK: Sections
+
+    private var startSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Start", symbol: "play.fill") {
+                // Manual sending works under Show Lock and while disarmed.
+                Button { model.fire(song.id) } label: { Label("Send Start", systemImage: "play.fill") }
+                    .capsuleButton()
+                    .help("Send this Song's Start Actions now, even if disarmed")
+            }
+            GroupedBox {
+                timeRow(.start)
+                RowDivider()
+                noteRow(.start, help: "Its Note On makes the Song Enter: sends its Start Actions and makes it current, even with no timecode")
+            }
+            actionList(.start, title: "Start Actions")
+        }
+    }
+
+    private var endSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("End", symbol: "stop.fill") {
+                Button { model.fireStop(song.id) } label: { Label("Send Stop", systemImage: "stop.fill") }
+                    .capsuleButton()
+                    .disabled(song.stopActions.isEmpty)
+                    .help("Send this Song's Stop Actions now, even if disarmed")
+            }
+            if song.stopActions.isEmpty {
+                // One collapsed line while there is nothing to send; stacked if it doesn't fit.
+                GroupedBox {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 16) {
+                            timeControls(.end)
+                            noteControls(.stop)
+                            Spacer(minLength: 12)
+                            Text("No Stop Actions").font(TrigType.body).foregroundColor(.secondary)
+                            addMenu(.stop, label: "Add")
+                        }
+                        .frame(minHeight: 60)
+                        VStack(spacing: 0) {
+                            timeRow(.end)
+                            RowDivider()
+                            noteRow(.stop, help: stopNoteHelp)
+                            RowDivider()
+                            FormRow(label: "No Stop Actions") { addMenu(.stop, label: "Add") }
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                Footnote("Stop Actions are usually empty. They are sent when the Playhead passes the end time or the Stop Note arrives, never on a timecode Stop.")
+            } else {
+                GroupedBox {
+                    timeRow(.end)
+                    RowDivider()
+                    noteRow(.stop, help: stopNoteHelp)
+                }
+                actionList(.stop, title: "Stop Actions")
+            }
+        }
+    }
+
+    private let stopNoteHelp = "Its Note On Ends the Song if it is current. With no span and no Start Note, it sends the Stop Actions every time"
+
+    private func sectionHeader<Trailing: View>(_ title: String, symbol: String,
+                                               @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack(spacing: 12) {
+            Label(title, systemImage: symbol).font(TrigType.sectionTitle)
+            Spacer()
+            trailing()
+        }
+    }
+
+    // MARK: Time and note
+
+    private enum TimeField {
+        case start, end
+        var label: String { self == .start ? "Start time" : "End time" }
+        var keyPath: WritableKeyPath<Song, Timecode> { self == .start ? \.start : \.end }
+    }
+
+    private func timeRow(_ field: TimeField) -> some View {
+        FormRow(label: field.label) { timeControls(field, labelled: false) }
+            .frame(minHeight: 60)
+    }
+
+    /// The time field and Capture, with a label when it sits on the collapsed line.
+    @ViewBuilder
+    private func timeControls(_ field: TimeField, labelled: Bool = true) -> some View {
+        HStack(spacing: 10) {
+            if labelled { Text(field.label).font(TrigType.label) }
+            TimecodeField(field.label, value: song[keyPath: field.keyPath]) { timecode in
+                var edited = song
+                edited[keyPath: field.keyPath] = timecode
+                return model.update(edited)
+            }
+            Button("Capture") { field == .start ? model.captureStart(for: song.id) : model.captureEnd(for: song.id) }
+                .capsuleButton()
+                .disabled(model.playhead == nil)
+                .help("Set the \(field.label.lowercased()) to the live Playhead")
+        }
+        .disabled(!song.hasSpan || model.isShowLocked)
+        .opacity(song.hasSpan ? 1 : 0.5)
+    }
+
+    private func noteRow(_ field: NoteField, help: String) -> some View {
+        FormRow(label: field.rawValue) { noteControls(field, labelled: false) }
+            .help(help)
+    }
+
+    @ViewBuilder
+    private func noteControls(_ field: NoteField, labelled: Bool = true) -> some View {
+        HStack(spacing: 10) {
+            if labelled { Text(field.rawValue).font(TrigType.label) }
+            NoteTriggerField(label: field.rawValue, value: song[keyPath: field.keyPath]) { note in
+                var edited = song
+                edited[keyPath: field.keyPath] = note
+                return model.update(edited)
+            }
+            Button("Learn") { learningNote = field }
+                .capsuleButton()
+                .help("Set the \(field.rawValue) from the next Note On")
+                .accessibilityLabel("Learn \(field.rawValue)")
+        }
+        .disabled(model.isShowLocked)
+    }
+
+    // MARK: Actions
+
+    private func actionList(_ list: ShowModel.ActionList, title: String) -> some View {
         let actions = song[keyPath: list.keyPath]
         return VStack(alignment: .leading, spacing: 8) {
             GroupHeader(title: title) { addMenu(list, label: "Add Action") }
             if actions.isEmpty {
-                GroupedBox { FormRow(label: empty) { EmptyView() }.foregroundColor(.secondary) }
+                GroupedBox {
+                    FormRow(label: "No \(title) yet. Add one to send when this Song starts.") { EmptyView() }
+                        .foregroundColor(.secondary)
+                }
             } else {
                 GroupedBox {
                     ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
