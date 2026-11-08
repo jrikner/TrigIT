@@ -26,11 +26,29 @@ var targets: [Target] = [
     // Set files on disk: the file format, previous versions, undo history.
     .target(name: "TrigITStorage", dependencies: ["TrigITEngine"]),
     .testTarget(name: "TrigITStorageTests", dependencies: ["TrigITStorage"]),
+    // The Windows spike's platform-free half (issue #60): argument parsing,
+    // the engine loop and the timing report. Built everywhere so its tests run everywhere.
+    .target(name: "TrigITSpike", dependencies: ["TrigITEngine", "TrigITProtocols"]),
+    .testTarget(name: "TrigITSpikeTests", dependencies: ["TrigITSpike", "TrigITStorage"]),
 ]
 
 #if os(macOS)
 products.append(.executable(name: "TrigIT", targets: ["TrigITApp"]))
 targets.append(.executableTarget(name: "TrigITApp", dependencies: ["TrigITEngine", "TrigITProtocols", "TrigITStorage"]))
+#endif
+
+#if os(Windows)
+// The Windows spike: a console app that follows Art-Net Timecode and LTC and
+// fires a Set's OSC Actions, measuring the timing (see docs/windows-spike.md).
+products.append(.executable(name: "TrigITWindows", targets: ["TrigITWindows"]))
+targets.append(.target(
+    name: "CWindowsIO",
+    linkerSettings: [.linkedLibrary("ws2_32"), .linkedLibrary("ole32"), .linkedLibrary("winmm"), .linkedLibrary("avrt")]
+))
+targets.append(.executableTarget(
+    name: "TrigITWindows",
+    dependencies: ["TrigITSpike", "TrigITStorage", "TrigITProtocols", "CWindowsIO"]
+))
 #endif
 
 let package = Package(
