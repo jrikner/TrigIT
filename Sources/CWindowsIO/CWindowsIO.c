@@ -313,8 +313,10 @@ static DWORD WINAPI capture_thread(LPVOID unused) {
                     }
                     capture.block[i] = sample;
                 }
-                // qpc is the QueryPerformanceCounter time of the first frame, in 100 ns units.
-                double first = qpc ? (double)qpc / 1e7 : arrival - frames / capture.rate;
+                // qpc is the QueryPerformanceCounter time of the first frame, in 100 ns
+                // units, unless WASAPI flags it unreliable.
+                int timestamp_ok = qpc && !(flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR);
+                double first = timestamp_ok ? (double)qpc / 1e7 : arrival - frames / capture.rate;
                 capture.each(capture.context, capture.block, (int32_t)frames, capture.rate, first, arrival);
             }
             IAudioCaptureClient_ReleaseBuffer(capture.capture, frames);
