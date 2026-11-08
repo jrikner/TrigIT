@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  SWIFT_VERSION: 6.4.2
+
+jobs:
+  # The platform-free core: protocols, engine, storage (with the libltc fixtures).
+  linux:
+    runs-on: ubuntu-latest
+    container: swift:6.4.2
+    steps:
+      - uses: actions/checkout@v4
+      # No Package.resolved (no dependencies), so key on the manifest.
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: linux-swift-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.swift') }}
+      - run: swift test
+
+  # Everything, including the SwiftUI app.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: swift
+        run: echo "version=$(swift --version 2>&1 | head -1 | md5)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: macos-${{ steps.swift.outputs.version }}-${{ hashFiles('Package.swift') }}
+      - run: swift build
+      - run: swift test
+
+  # Keeps the core portable for the Windows version (#60). Pushes to main only
+  # while the repo is private, and informational: a failure doesn't fail CI.
+  windows:
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: compnerd/gha-setup-swift@v0.5.1
+        with:
+          branch: swift-${{ env.SWIFT_VERSION }}-release
+          tag: ${{ env.SWIFT_VERSION }}-RELEASE
+      - run: swift build
+      - run: swift test

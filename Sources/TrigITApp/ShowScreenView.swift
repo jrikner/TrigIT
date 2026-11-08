@@ -90,9 +90,9 @@ struct PlayheadText: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dim = false
 
-    private enum State { case inSong, betweenSongs, stopped, none }
+    private enum PlayheadState { case inSong, betweenSongs, stopped, none }
 
-    private var state: State {
+    private var state: PlayheadState {
         guard let playhead = model.playhead else { return .none }
         guard model.isReceiving, model.alert == nil else { return .stopped }
         return model.set.songs.contains { $0.contains(playhead) } ? .inSong : .betweenSongs
@@ -147,7 +147,7 @@ struct PlayheadText: View {
         }
     }
 
-    private func color(_ state: State) -> Color {
+    private func color(_ state: PlayheadState) -> Color {
         switch state {
         case .inSong: return StateColor.ok
         case .betweenSongs: return StateColor.caution
@@ -156,7 +156,7 @@ struct PlayheadText: View {
         }
     }
 
-    private func word(_ state: State) -> String {
+    private func word(_ state: PlayheadState) -> String {
         switch state {
         case .inSong: return "Rolling in a Song"
         case .betweenSongs: return "Rolling between Songs"

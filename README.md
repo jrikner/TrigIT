@@ -1,5 +1,7 @@
 # TrigIT
 
+[![CI](https://github.com/jrikner/TrigIT/actions/workflows/ci.yml/badge.svg)](https://github.com/jrikner/TrigIT/actions/workflows/ci.yml)
+
 A lightweight macOS app that follows show timecode (LTC, MTC, Art-Net Timecode) and fires OSC, MIDI, Art-Net and sACN messages when the timecode enters a Song. See `GLOSSARY.md` for the vocabulary and issue #1 for the spec.
 
 ## Run the app (macOS 13+)
