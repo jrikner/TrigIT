@@ -32,6 +32,57 @@ extension ShowSet {
     }
 }
 
+// MARK: - Note Clashes
+
+/// Songs whose Start or Stop Notes would trigger together on one Note On.
+/// Warned about in Edit but allowed, since a Song may be mid-way through
+/// swapping notes with another.
+public struct NoteClash: Hashable, Sendable {
+    public enum Kind: Hashable, Sendable {
+        /// Two or more Songs share this Start Note: all of them Enter.
+        case startNote
+        /// Two or more Songs share this Stop Note.
+        case stopNote
+        /// One Song's Start Note is its own Stop Note: it Ends and Enters again.
+        case startIsStop
+    }
+
+    public var kind: Kind
+    public var note: NoteTrigger
+    /// In Set order; one Song for `.startIsStop`.
+    public var songs: [SongID]
+
+    public init(kind: Kind, note: NoteTrigger, songs: [SongID]) {
+        self.kind = kind
+        self.note = note
+        self.songs = songs
+    }
+}
+
+extension ShowSet {
+    /// Every Note Clash in the Set. One Song's Stop Note being another's
+    /// Start Note is a hand-off, not a clash.
+    public var noteClashes: [NoteClash] {
+        func shared(_ kind: NoteClash.Kind, _ note: (Song) -> NoteTrigger?) -> [NoteClash] {
+            var order: [NoteTrigger] = []
+            var songsByNote: [NoteTrigger: [SongID]] = [:]
+            for song in songs {
+                guard let trigger = note(song) else { continue }
+                if songsByNote[trigger] == nil { order.append(trigger) }
+                songsByNote[trigger, default: []].append(song.id)
+            }
+            return order.compactMap { trigger in
+                let ids = songsByNote[trigger]!
+                return ids.count > 1 ? NoteClash(kind: kind, note: trigger, songs: ids) : nil
+            }
+        }
+        let own = songs.compactMap { song in
+            song.startNote.flatMap { $0 == song.stopNote ? NoteClash(kind: .startIsStop, note: $0, songs: [song.id]) : nil }
+        }
+        return shared(.startNote, \.startNote) + shared(.stopNote, \.stopNote) + own
+    }
+}
+
 // MARK: - CSV import
 
 /// What happened when Songs were imported from CSV.

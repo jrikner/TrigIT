@@ -138,8 +138,34 @@ struct SongListRow: View {
 
     private var problem: String? {
         if song.hasSpan && song.end < song.start { return "End is before start: this Song never fires" }
-        guard let refused = model.refusedEdit, refused.songID == song.id || refused.conflicts.contains(song.id) else { return nil }
-        return refused.message
+        if let refused = model.refusedEdit, refused.songID == song.id || refused.conflicts.contains(song.id) {
+            return refused.message
+        }
+        let clashes = model.set.noteClashMessages(for: song.id)
+        return clashes.isEmpty ? nil : clashes.joined(separator: "\n")
+    }
+}
+
+extension ShowSet {
+    /// Warnings about a Song's Note Clashes: those of its Start Note field,
+    /// its Stop Note field, or both (nil).
+    func noteClashMessages(for songID: SongID, field: SongSectionsEditor.NoteField? = nil) -> [String] {
+        func names(_ ids: [SongID]) -> String {
+            ids.filter { $0 != songID }.compactMap { id in songs.first { $0.id == id } }
+                .map { "\"\($0.name)\"" }.joined(separator: ", ")
+        }
+        return noteClashes.filter { $0.songs.contains(songID) }.compactMap { clash in
+            switch clash.kind {
+            case .startNote where field != .stop:
+                return "Start Note \(clash.note.spoken) is also the Start Note of \(names(clash.songs))"
+            case .stopNote where field != .start:
+                return "Stop Note \(clash.note.spoken) is also the Stop Note of \(names(clash.songs))"
+            case .startIsStop:
+                return "Start Note and Stop Note are both \(clash.note.spoken): the Song Ends and Enters again"
+            default:
+                return nil
+            }
+        }
     }
 }
 
@@ -331,13 +357,14 @@ struct SongSectionsEditor: View {
                         VStack(spacing: 0) {
                             timeRow(.end)
                             RowDivider()
-                            noteRow(.stop, help: stopNoteHelp)
+                            noteRow(.stop, help: stopNoteHelp, warns: false)
                             RowDivider()
                             FormRow(label: "No Stop Actions") { addMenu(.stop, label: "Add") }
                                 .foregroundColor(.secondary)
                         }
                     }
                 }
+                noteClashWarning(.stop)
                 Footnote("Stop Actions are usually empty. They are sent when the Playhead passes the end time or the Stop Note arrives, never on a timecode Stop.")
             } else {
                 GroupedBox {
@@ -393,9 +420,25 @@ struct SongSectionsEditor: View {
         .opacity(song.hasSpan ? 1 : 0.5)
     }
 
-    private func noteRow(_ field: NoteField, help: String) -> some View {
-        FormRow(label: field.rawValue) { noteControls(field, labelled: false) }
-            .help(help)
+    private func noteRow(_ field: NoteField, help: String, warns: Bool = true) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            FormRow(label: field.rawValue) { noteControls(field, labelled: false) }
+                .help(help)
+            if warns { noteClashWarning(field) }
+        }
+    }
+
+    /// Warns, but allows, a note that clashes with another Song's or its own.
+    @ViewBuilder
+    private func noteClashWarning(_ field: NoteField) -> some View {
+        let messages = model.set.noteClashMessages(for: song.id, field: field)
+        if !messages.isEmpty {
+            Label(messages.joined(separator: "\n"), systemImage: "exclamationmark.triangle.fill")
+                .font(TrigType.secondary)
+                .foregroundColor(StateColor.caution)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 10)
+        }
     }
 
     @ViewBuilder
