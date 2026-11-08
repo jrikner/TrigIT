@@ -107,15 +107,20 @@ public struct SpikeSession {
     }
 
     private mutating func receive(_ reading: TimecodeReading, arrivedAt: Double, role: SourceRole) -> Step {
-        var stats = sources[reading.source] ?? SourceStats()
+        // In place, so the jitter array isn't copied on every frame.
+        Self.record(reading, arrivedAt: arrivedAt, in: &sources[reading.source, default: SourceStats()])
+        let events = engine.handle(reading, from: role)
+        // A reading from the source the engine isn't following changes nothing.
+        return apply(events, arrivedAt: arrivedAt, reading: engine.liveSource == role ? reading : nil)
+    }
+
+    private static func record(_ reading: TimecodeReading, arrivedAt: Double, in stats: inout SourceStats) {
         stats.frames += 1
         if stats.frameRate == reading.frameRate, let last = stats.lastArrival, arrivedAt - last <= ShowEngine.dropoutThreshold {
             stats.jitter.append(abs(arrivedAt - last - 1 / reading.frameRate.realFramesPerSecond))
         }
         stats.frameRate = reading.frameRate
         stats.lastArrival = arrivedAt
-        sources[reading.source] = stats
-        return apply(engine.handle(reading, from: role), arrivedAt: arrivedAt, reading: reading)
     }
 
     private mutating func apply(_ events: [EngineEvent], arrivedAt: Double, reading: TimecodeReading?) -> Step {

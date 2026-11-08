@@ -202,9 +202,9 @@ let reportURL = URL(fileURLWithPath: options.reportPath ?? "TrigIT-timing-report
 let environment = SpikeSession.Environment(
     computer: "\(ProcessInfo.processInfo.operatingSystemVersionString), \(ProcessInfo.processInfo.activeProcessorCount) logical processors",
     setName: set.name, sources: sourceLines.joined(separator: "; "), timer: timerName, tickPeriod: tickPeriod)
+// Held until exit, so the input threads send nothing the report leaves out.
 lock.lock()
 let report = session.report(environment, endedAt: cwio_now())
-lock.unlock()
 do {
     try report.write(to: reportURL, atomically: true, encoding: .utf8)
     print("\nTiming report written to \(reportURL.path)")

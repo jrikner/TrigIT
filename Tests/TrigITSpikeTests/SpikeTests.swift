@@ -114,6 +114,13 @@ final class SpikeSessionTests: XCTestCase {
         XCTAssertTrue(report(session).contains("Songs fired: 2 (late: 0, double: 0, missed: 0)"))
     }
 
+    func testAnIgnoredBackupReadingDoesNotMakeThePrimaryFireLate() {
+        var session = SpikeSession(set: set, startedAt: 10)
+        _ = session.receiveArtNet(packet("00:01:00:00"), arrivedAt: 10, role: .backup)
+        _ = session.receiveArtNet(packet("00:01:00:05"), arrivedAt: 10.01, role: .primary)
+        XCTAssertTrue(report(session).contains("Songs fired: 1 (late: 0, double: 0, missed: 0)"), report(session))
+    }
+
     func testNonTimecodePacketsAreIgnored() {
         var session = SpikeSession(set: set, startedAt: 10)
         XCTAssertTrue(session.receiveArtNet([1, 2, 3], arrivedAt: 10, role: .primary).sends.isEmpty)
