@@ -151,3 +151,47 @@ final class CSVImportTests: XCTestCase {
         XCTAssertEqual(set.importSongs(csv: ""), SongImportReport())
     }
 }
+
+/// Note Clashes: Start and Stop Notes that would trigger Songs together.
+final class NoteClashTests: XCTestCase {
+    let c3 = NoteTrigger(channel: 0, note: 60)
+    let d3 = NoteTrigger(channel: 0, note: 62)
+
+    func song(_ id: UInt64, start: NoteTrigger? = nil, stop: NoteTrigger? = nil) -> Song {
+        Song(id: SongID(rawValue: id), name: "S\(id)", hasSpan: false, startNote: start, stopNote: stop)
+    }
+
+    func ids(_ raw: UInt64...) -> [SongID] { raw.map { SongID(rawValue: $0) } }
+
+    func testDistinctNotesDoNotClash() {
+        let set = ShowSet(songs: [song(1, start: c3), song(2, start: d3, stop: NoteTrigger(channel: 1, note: 60))])
+        XCTAssertEqual(set.noteClashes, [])
+    }
+
+    func testASharedStartNoteClashesOnEverySongUsingIt() {
+        let set = ShowSet(songs: [song(1, start: c3), song(2, start: d3), song(3, start: c3), song(4, start: c3)])
+        XCTAssertEqual(set.noteClashes, [NoteClash(kind: .startNote, note: c3, songs: ids(1, 3, 4))])
+    }
+
+    func testASharedStopNoteClashes() {
+        let set = ShowSet(songs: [song(1, stop: d3), song(2, stop: d3)])
+        XCTAssertEqual(set.noteClashes, [NoteClash(kind: .stopNote, note: d3, songs: ids(1, 2))])
+    }
+
+    func testASongWhoseStartNoteIsItsStopNoteClashes() {
+        let set = ShowSet(songs: [song(1, start: c3, stop: c3)])
+        XCTAssertEqual(set.noteClashes, [NoteClash(kind: .startIsStop, note: c3, songs: ids(1))])
+    }
+
+    func testAStopNoteHandingOffToAnotherSongsStartNoteIsNotAClash() {
+        let set = ShowSet(songs: [song(1, start: d3, stop: c3), song(2, start: c3)])
+        XCTAssertEqual(set.noteClashes, [])
+    }
+
+    func testFixingTheNoteClearsTheClash() {
+        var set = ShowSet(songs: [song(1, start: c3), song(2, start: c3)])
+        XCTAssertFalse(set.noteClashes.isEmpty)
+        set.apply(song(2, start: d3))
+        XCTAssertEqual(set.noteClashes, [])
+    }
+}

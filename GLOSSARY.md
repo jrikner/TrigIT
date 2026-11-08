@@ -71,6 +71,10 @@ _Avoid_: Trigger note, MIDI cue
 An optional incoming MIDI note that makes its Song End if it is current. A Song with only a Stop Note sends its Stop Actions every time the note arrives.
 _Avoid_: Release note, off note
 
+**Note Clash**:
+The same note (channel and note number) used as the Start Note of two or more Songs, the Stop Note of two or more Songs, or both the Start Note and the Stop Note of one Song. Edit warns about it but allows it. One Song's Stop Note being another Song's Start Note is a hand-off, not a Note Clash.
+_Avoid_: Note conflict, duplicate note
+
 **Entering**:
 A Song becoming the current Song: the Playhead arriving inside its span from outside it (by playing in or by a Jump landing anywhere inside it), or its Start Note arriving while it is not current.
 _Avoid_: Hitting, reaching
