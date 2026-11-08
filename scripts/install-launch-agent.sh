@@ -7,11 +7,14 @@
 #   scripts/install-launch-agent.sh --uninstall
 set -euo pipefail
 
-LABEL=com.trigit.TrigIT.keepalive
+LABEL=com.ncoab.trigit.keepalive
+OLD_LABEL=com.trigit.TrigIT.keepalive  # before #32; removed on install and uninstall
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+launchctl bootout "$DOMAIN/$OLD_LABEL" 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/$OLD_LABEL.plist"
 if [[ "${1:-}" == "--uninstall" ]]; then
     rm -f "$PLIST"
     echo "Removed $LABEL"
