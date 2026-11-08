@@ -38,8 +38,8 @@ struct ContentView: View {
             case .show: ShowScreenView()
             case .edit: EditView(section: $section)
             }
-        }
-        .safeAreaInset(edge: .bottom) {
+            // In the layout, not a safe-area inset: the split view's scroll views
+            // ignore that inset, so their last rows ended up under the panel.
             if model.source == .simulator || model.backupSource == .simulator {
                 SimulatorPanel().padding(8)
             }
