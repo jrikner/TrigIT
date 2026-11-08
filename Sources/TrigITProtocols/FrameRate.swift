@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// The frame rates a Timecode Source can run at.
 public enum FrameRate: String, CaseIterable, Sendable, Codable {
     case fps24 = "24"

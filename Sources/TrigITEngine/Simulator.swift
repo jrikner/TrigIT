@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import TrigITProtocols
 
 /// A virtual Timecode Source for programming and testing a Set without real

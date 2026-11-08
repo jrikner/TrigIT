@@ -41,6 +41,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSHumanReadableCopyright</key><string>© 2026 Jonathan Rikner. Licensed under GPL-3.0-or-later.</string>
     <key>NSMicrophoneUsageDescription</key><string>TrigIT reads LTC timecode from an audio input.</string>
     <key>NSLocalNetworkUsageDescription</key><string>TrigIT sends show cues to devices on the local network and receives Art-Net Timecode.</string>
 </dict>

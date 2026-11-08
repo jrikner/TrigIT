@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// One frame of SMPTE Linear Timecode decoded from audio.
 public struct LTCFrame: Hashable, Sendable {
     public var hours: Int

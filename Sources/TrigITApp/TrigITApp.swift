@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import AppKit
 import SwiftUI
 
@@ -22,6 +24,17 @@ struct SetCommands: Commands {
     @ObservedObject var model: ShowModel
 
     var body: some Commands {
+        // The attribution is a GPL §7(b) term (see NOTICE): modified versions keep it here.
+        CommandGroup(replacing: .appInfo) {
+            Button("About TrigIT") {
+                NSApp.orderFrontStandardAboutPanel(options: [
+                    .applicationName: "TrigIT",
+                    .credits: NSAttributedString(
+                        string: "Originally created by Jonathan Rikner.\nLicensed under GPL-3.0-or-later.",
+                        attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.labelColor]),
+                ])
+            }
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Set…") { model.chooseAndCreateNew() }
                 .keyboardShortcut("n")

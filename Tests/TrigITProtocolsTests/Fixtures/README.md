@@ -10,3 +10,5 @@ Raw mono audio, unsigned 8-bit, 48 kHz, written by libltc 1.3.2 (an LTC implemen
 | `libltc-30fps-23-59-59-00.u8` | 60 | midnight (23:59:59:29 → 00:00:00:00) |
 
 Generated with a small C program around `ltc_encoder_encode_frame`: create the encoder with `ltc_encoder_create(48000, fps, standard, 0)`, call `ltc_encoder_set_filter(e, 40)` and `ltc_encoder_set_volume(e, -18)`, set the start time, then encode and increment once per frame.
+
+These recordings are data only. No libltc code is vendored, linked or built into TrigIT or its tests; libltc was run once, outside this repository, to produce them.

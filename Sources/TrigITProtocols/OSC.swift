@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// One OSC argument. TrigIT sends the three core OSC 1.0 types.
 public enum OSCArgument: Hashable, Sendable, CustomStringConvertible {
     case int(Int32)

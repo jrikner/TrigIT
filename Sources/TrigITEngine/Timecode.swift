@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import TrigITProtocols
 
 /// The frame rates a Timecode Source can run at. Defined with the protocol

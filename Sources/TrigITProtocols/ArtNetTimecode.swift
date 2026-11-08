@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// Art-Net's UDP port.
 public let artNetPort: UInt16 = 6454
 

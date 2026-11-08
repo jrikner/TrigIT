@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// Undo and redo for a value edited as a whole, such as a Set.
 ///
 /// Every edit records the value as it was before. Edits that follow each

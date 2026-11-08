@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import Foundation
 
 /// The show log on disk: one plain-text file per day, named by its date

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// Values for one DMX universe: slots 1...512, stored 0-based.
 public let dmxSlotCount = 512
 
