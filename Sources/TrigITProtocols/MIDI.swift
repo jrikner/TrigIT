@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// A MIDI 1.0 message TrigIT cares about.
 public enum MIDIMessage: Hashable, Sendable {
     /// Note On with velocity above 0. `channel` is 0-based.

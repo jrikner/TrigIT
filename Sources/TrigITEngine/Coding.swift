@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // How a Set is written to its file. Hand-written rather than synthesized so
 // the JSON reads well (timecodes as "01:00:00:00", Actions tagged by type) and
 // so files from older versions still open: any field added later is optional

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// Whether a Destination is reachable right now, and what proves it. A send
 /// alone never proves anything: UDP accepts a datagram for any routable
 /// address, connected or not.

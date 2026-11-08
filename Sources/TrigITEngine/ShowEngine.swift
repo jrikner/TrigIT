@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import TrigITProtocols
 
 /// The kind of Timecode Source a reading came from.

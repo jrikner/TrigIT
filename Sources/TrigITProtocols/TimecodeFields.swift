@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// The four fields of a timecode as a protocol carries them, with the frame
 /// arithmetic the codecs need (drop-frame aware, wrapping at 24 hours).
 public struct TimecodeFields: Hashable, Sendable, CustomStringConvertible {

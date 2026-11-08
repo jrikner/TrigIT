@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// A MIDI note to trigger: Note On, then a matching Note Off shortly after.
 public struct MIDINote: Hashable, Sendable, Codable {
     /// 0...15 (shown to people as 1...16).

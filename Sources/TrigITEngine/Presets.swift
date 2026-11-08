@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import TrigITProtocols
 
 /// A common Resolume or grandMA3 command. A preset only fills in an ordinary

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import TrigITProtocols
 
 /// Learn: program by example. The app listens on the chosen MIDI inputs and

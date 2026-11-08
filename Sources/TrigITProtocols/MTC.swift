@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// A timecode position decoded from MIDI Time Code.
 public struct MTCTime: Hashable, Sendable {
     public enum Kind: Hashable, Sendable {

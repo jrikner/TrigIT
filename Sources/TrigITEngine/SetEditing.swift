@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Editing rules for a Set: every timecode position belongs to at most one Song.
 
 extension Song {

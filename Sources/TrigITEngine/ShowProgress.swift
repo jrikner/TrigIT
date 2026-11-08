@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /// Where the Playhead is within the Set, for the Show screen: how far into the
 /// current Song's span it is, and how long until the next Song starts.
 public struct ShowProgress: Equatable, Sendable {

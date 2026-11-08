@@ -71,3 +71,9 @@ Give a Destination a DMX output (Destinations tab): Art-Net to its address (a no
 ## Set files
 
 A Set is one readable JSON file (`.trigit`), saved automatically a moment after every change and on quit; there is no Save command. TrigIT reopens the last Set at launch (the first launch creates an example in Documents/TrigIT). File → New Set, Open Set, Open Recent, Save As, Show in Finder. Edit → Undo/Redo covers every change to the Set. File → Previous Versions lists versions kept when the Set was opened and every two minutes of editing (the last 100, in Application Support/TrigIT/Versions) and restores any of them. A file that can't be opened is never overwritten: TrigIT says why and starts an unsaved empty Set.
+
+## License
+
+Originally created by Jonathan Rikner. © 2026 Jonathan Rikner.
+
+TrigIT is free software under the GNU General Public License, version 3 or (at your option) any later version (`GPL-3.0-or-later`); see [LICENSE](LICENSE). [NOTICE](NOTICE) adds one term under GPL §7(b): modified versions must keep the attribution "Originally created by Jonathan Rikner" in their README and in the app's About window.
