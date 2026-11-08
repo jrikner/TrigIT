@@ -123,7 +123,7 @@ struct EditView: View {
         HStack {
             Label(item.rawValue, systemImage: item.symbol).font(TrigType.body)
             Spacer()
-            if item == .destinations, model.set.destinations.contains(where: { model.reachability(of: $0.id) == .noReply }) {
+            if item == .destinations, model.set.destinations.contains(where: { model.reachability(of: $0.id).isOffline }) {
                 StateDot(color: StateColor.alert, size: 8).accessibilityLabel("A Destination has no reply")
             }
             if let count = count(item) {

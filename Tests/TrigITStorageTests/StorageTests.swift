@@ -58,6 +58,64 @@ final class SetFileTests: XCTestCase {
         XCTAssertEqual(set.songs.first?.stopActions, [])
         XCTAssertNil(set.destinations.first?.midiOutput)
         XCTAssertNil(set.destinations.first?.replyPort)
+        XCTAssertEqual(set.destinations.first?.transports, [.osc])
+    }
+
+    func testOpensDestinationsFromBeforeTheTransportSwitchesAsTheyBehaved() throws {
+        let text = """
+            {"format": "TrigIT Set", "version": 1, "set": {"destinations": [
+              {"name": "MA3", "host": "10.0.0.30", "port": 8000, "dmxOutput": "sACNUnicast",
+               "midiOutput": {"uniqueID": 42, "name": "MA3 MIDI"}}
+            ]}}
+            """
+        let ma3 = try XCTUnwrap(SetFile.decode(Data(text.utf8)).destinations.first)
+        XCTAssertEqual(ma3.transports, [.osc, .midi, .dmx])
+    }
+
+    func testOldSetsSendDMXToTheOSCAddressAndInterface() throws {
+        let text = """
+            {"format": "TrigIT Set", "version": 1, "set": {"destinations": [
+              {"name": "MA3", "host": "10.0.0.30", "port": 8000, "networkInterface": "en7", "dmxOutput": "artNet"}
+            ]}}
+            """
+        let ma3 = try XCTUnwrap(SetFile.decode(Data(text.utf8)).destinations.first)
+        XCTAssertEqual(ma3.dmxHost, "10.0.0.30")
+        XCTAssertEqual(ma3.dmxInterface, "en7")
+        XCTAssertEqual(ma3.sacnPriority, 100)
+        XCTAssertEqual(ma3.dmxSourceName, "TrigIT")
+        XCTAssertEqual(ma3.dmxRefreshRate, 30)
+    }
+
+    func testDMXKeepsItsOwnAddressAndAnAutomaticInterface() throws {
+        var set = fullSet()
+        set.destinations[1].networkInterface = "en1"
+        set.destinations[1].dmxInterface = nil
+        set.destinations[1].dmxHost = "2.0.0.10"
+        set.destinations[1].sacnPriority = 150
+        set.destinations[1].dmxSourceName = "Stage left"
+        set.destinations[1].dmxRefreshRate = 40
+        let reopened = try SetFile.decode(SetFile.encode(set)).destinations[1]
+        XCTAssertEqual(reopened, set.destinations[1])
+        XCTAssertNil(reopened.dmxInterface, "Automatic stays Automatic rather than copying the OSC interface")
+    }
+
+    func testClampsSACNPriorityAndRefreshRate() {
+        var lights = Destination(name: "Lights", host: "", port: 0, sacnPriority: 255, dmxRefreshRate: 500)
+        XCTAssertEqual(lights.sacnPriority, 200)
+        XCTAssertEqual(lights.dmxRefreshRate, 44)
+        lights.dmxRefreshRate = 0
+        XCTAssertEqual(lights.dmxRefreshRate, 1)
+    }
+
+    func testASwitchedOffTransportKeepsItsSettings() throws {
+        var set = fullSet()
+        set.destinations[1].usesMIDI = false
+        set.destinations[1].usesOSC = false
+        let reopened = try SetFile.decode(SetFile.encode(set)).destinations[1]
+        XCTAssertEqual(reopened.transports, [.dmx])
+        XCTAssertEqual(reopened.midiOutput?.uniqueID, -123_456)
+        XCTAssertEqual(reopened.port, 8000)
+        XCTAssertNil(reopened.activeMIDIOutput)
     }
 
     func testClampsAnOutOfRangeStopTime() throws {

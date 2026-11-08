@@ -34,6 +34,18 @@ final class DMXPacketTests: XCTestCase {
         XCTAssertEqual(packet.encoded.count, 638)
     }
 
+    func testSACNPriorityAndSourceNameMatchTheSacnLibrary() {
+        // DataPacket(cid=0...15, sourceName="Desk B", universe=7, priority=150, sequence=42): 126-byte header.
+        let header = bytes("""
+            001000004153432d45312e3137000000726e00000004000102030405060708090a0b0c0d0e0f\
+            7258000000024465736b20420000000000000000000000000000000000000000000000000000\
+            00000000000000000000000000000000000000000000000000000000000000009600002a0000\
+            07720b02a100000001020100
+            """)
+        let packet = SACNDataPacket(cid: Array(0...15), sourceName: "Desk B", universe: 7, priority: 150, sequence: 42, data: slots)
+        XCTAssertEqual(packet.encoded, header + slots)
+    }
+
     func testArtDmxPadsShortDataToAnEvenLengthOfAtLeastTwo() {
         XCTAssertEqual(Array(ArtDmxPacket(portAddress: 0, sequence: 1, data: [9]).encoded.suffix(4)), [0x00, 0x02, 9, 0])
         XCTAssertEqual(Array(ArtDmxPacket(portAddress: 0, sequence: 1, data: [1, 2, 3]).encoded[16..<18]), [0x00, 0x04])

@@ -81,9 +81,9 @@ final class DMXSocketSender {
 }
 
 /// Streams every universe the Set's pulse Actions use, from launch until quit,
-/// and plays pulses into them. Each universe is refreshed 30 times a second
-/// (zeros at rest), and a pulse's start and end are sent at once rather than
-/// waiting for the next refresh.
+/// and plays pulses into them. Each universe is refreshed at its Destination's
+/// refresh rate (zeros at rest), and a pulse's start and end are sent at once
+/// rather than waiting for the next refresh.
 @MainActor
 final class DMXStreamer {
     struct UniverseKey: Hashable, Sendable {
@@ -91,8 +91,8 @@ final class DMXStreamer {
         let universe: Int
     }
 
-    static let refreshRate = 30.0
-    static let sourceName = "TrigIT"
+    /// How often the streamer looks for universes due a refresh.
+    private static let tick = 0.005
 
     /// Reports a problem with a universe once, until it sends successfully again.
     var onError: ((String) -> Void)?
@@ -101,12 +101,13 @@ final class DMXStreamer {
     private var mixer = DMXPulseMixer<UniverseKey>()
     private var streams: [UniverseKey: Destination] = [:]
     private var sequences: [UniverseKey: UInt8] = [:]
+    private var lastSent: [UniverseKey: Double] = [:]
     private var failing: Set<UniverseKey> = []
     private var timer: Timer?
     private let cid = DMXStreamer.componentID()
 
     init() {
-        let timer = Timer(timeInterval: 1 / Self.refreshRate, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: Self.tick, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -117,18 +118,19 @@ final class DMXStreamer {
     func update(for set: ShowSet) {
         var next: [UniverseKey: Destination] = [:]
         for (id, universes) in set.dmxUniversesInUse {
-            guard let destination = set.destination(id), destination.dmxOutput != nil else { continue }
+            guard let destination = set.destination(id), destination.activeDMXOutput != nil else { continue }
             for universe in universes {
                 next[UniverseKey(destination: id, universe: universe)] = destination
             }
         }
         streams = next
         failing.formIntersection(next.keys)
+        lastSent = lastSent.filter { next[$0.key] != nil }
     }
 
     /// Starts a pulse now. Throws if the Destination can't take it.
     func play(_ pulse: DMXPulse, to destination: Destination) throws {
-        guard let output = destination.dmxOutput else { throw PulseError.noDMXOutput(destination.name) }
+        guard let output = destination.activeDMXOutput else { throw PulseError.noDMXOutput(destination.name) }
         guard output.universeRange.contains(pulse.universe) else {
             throw PulseError.universeOutOfRange(pulse.universe, output)
         }
@@ -149,7 +151,7 @@ final class DMXStreamer {
 
         var errorDescription: String? {
             switch self {
-            case .noDMXOutput(let name): return "\(name) has no Art-Net or sACN output (Destinations tab)"
+            case .noDMXOutput(let name): return "DMX is off for \(name) (Destinations tab)"
             case .universeOutOfRange(let universe, let output):
                 return "universe \(universe) is outside \(output.name)'s range \(output.universeRange.lowerBound)-\(output.universeRange.upperBound)"
             }
@@ -158,12 +160,15 @@ final class DMXStreamer {
 
     private func refresh() {
         let now = ProcessInfo.processInfo.systemUptime
-        for key in streams.keys { send(key, at: now) }
+        for (key, destination) in streams where now - (lastSent[key] ?? -.infinity) >= 1 / destination.dmxRefreshRate - Self.tick / 2 {
+            send(key, at: now)
+        }
     }
 
     private func send(_ key: UniverseKey, at time: Double) {
-        guard let destination = streams[key], let output = destination.dmxOutput else { return }
+        guard let destination = streams[key], let output = destination.activeDMXOutput else { return }
         let slots = mixer.levels(key, at: time)
+        lastSent[key] = time
         let sequence = nextSequence(key, output: output)
         let bytes: [UInt8]
         let host: String
@@ -171,16 +176,16 @@ final class DMXStreamer {
         switch output {
         case .artNet:
             bytes = ArtDmxPacket(portAddress: key.universe, sequence: sequence, data: slots).encoded
-            host = destination.host
+            host = destination.dmxHost
             port = artNetPort
         case .sACNMulticast, .sACNUnicast:
-            bytes = SACNDataPacket(cid: cid, sourceName: Self.sourceName, universe: key.universe,
-                                   sequence: sequence, data: slots).encoded
-            host = output == .sACNMulticast ? SACNDataPacket.multicastAddress(universe: key.universe) : destination.host
+            bytes = SACNDataPacket(cid: cid, sourceName: destination.dmxSourceName, universe: key.universe,
+                                   priority: destination.sacnPriority, sequence: sequence, data: slots).encoded
+            host = output == .sACNMulticast ? SACNDataPacket.multicastAddress(universe: key.universe) : destination.dmxHost
             port = SACNDataPacket.port
         }
         do {
-            try sender.send(bytes, to: host, port: port, interface: destination.networkInterface)
+            try sender.send(bytes, to: host, port: port, interface: destination.dmxInterface)
             failing.remove(key)
         } catch {
             if failing.insert(key).inserted {

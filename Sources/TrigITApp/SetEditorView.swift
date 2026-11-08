@@ -513,6 +513,7 @@ struct SongSectionsEditor: View {
         Menu {
             ForEach(ShowModel.NewActionKind.allCases, id: \.self) { kind in
                 Button(kind.label) { model.addAction(kind, to: song.id, list: list) }
+                    .disabled(!model.set.destinations.contains(where: kind.canUse))
             }
             Divider()
             Button("From Resolume or grandMA3 Preset…") { presetList = list }
@@ -555,7 +556,10 @@ struct ActionRow: View {
                             model.update(edited, in: songID)
                         }
                     )) {
-                        ForEach(model.set.destinations) { Text($0.name).tag($0.id) }
+                        // Only Destinations that can carry it, plus its own so the choice stays visible.
+                        ForEach(model.set.destinations.filter { $0.canCarry(action.message) || $0.id == action.destinationID }) {
+                            Text($0.name).tag($0.id)
+                        }
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
@@ -616,22 +620,23 @@ struct ActionRow: View {
         case .osc: return "OSC"
         case .midiNote: return "MIDI Note"
         case .msc: return "MIDI Show Control"
-        case .dmxPulse: return "\(model.set.destination(action.destinationID)?.dmxOutput?.name ?? "DMX") pulse"
+        case .dmxPulse: return "\(model.set.destination(action.destinationID)?.activeDMXOutput?.name ?? "DMX") pulse"
         }
     }
 
     /// Why this Action's Destination can't carry it, if it can't.
     private var transportProblem: String? {
         guard let destination = model.set.destination(action.destinationID) else { return nil }
+        guard destination.canCarry(action.message) else {
+            return "\(action.message.transport.name) is off for this Destination; switch it on in Destinations"
+        }
         switch action.message {
         case .osc:
             return nil
         case .midiNote, .msc:
             return destination.midiOutput == nil ? "This Destination has no MIDI output; set one in Destinations" : nil
         case .dmxPulse(let pulse):
-            guard let output = destination.dmxOutput else {
-                return "This Destination has no Art-Net or sACN output; set one in Destinations"
-            }
+            guard let output = destination.activeDMXOutput else { return nil }
             return output.universeRange.contains(pulse.universe)
                 ? nil : "Universe \(pulse.universe) is outside \(output.name)'s range \(output.universeRange.lowerBound) to \(output.universeRange.upperBound)"
         }
