@@ -99,7 +99,7 @@ final class ShowModel: ObservableObject {
     /// Each Action's last send, and each Destination's.
     @Published private(set) var sendResults: [ActionID: SendResult] = [:]
     @Published private(set) var destinationSends: [DestinationID: SendResult] = [:]
-    /// Songs that fired since the last Stop or disarm.
+    /// Songs that fired since TrigIT was last disarmed. A Stop keeps them.
     @Published private(set) var firedThisRun: Set<SongID> = []
     /// The Song timecode or its Start Note entered while disarmed, so nothing
     /// was sent: it is not shown as playing until it Enters again Armed or is
@@ -783,7 +783,7 @@ final class ShowModel: ObservableObject {
             let sends = cause != .manual && !isArmed && !(song(id)?.stopActions.isEmpty ?? true) ? ", disarmed, nothing sent" : ""
             record("\(name) ended (\(how)\(sends))", kind: .stop)
         case .stopped:
-            firedThisRun = []
+            // Lost or stopped timecode keeps the played history; only disarming clears it.
             record("Timecode stopped", kind: .stop)
         case .dropout(let seconds):
             record("Timecode dropout: \(Int((seconds * 1000).rounded())) ms gap", kind: .dropout)

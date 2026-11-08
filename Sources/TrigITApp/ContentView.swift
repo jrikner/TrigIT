@@ -6,6 +6,8 @@ struct ContentView: View {
     @EnvironmentObject private var model: ShowModel
     @SceneStorage("appMode") private var mode: AppMode = .edit
     @SceneStorage("editSection") private var section: EditSection = .songs
+    @State private var closedDocumentProblem: String?
+    @State private var closedAlert: String?
 
     var body: some View {
         ZStack {
@@ -27,12 +29,11 @@ struct ContentView: View {
 
     private var main: some View {
         VStack(spacing: 0) {
-            if let problem = model.documentProblem {
-                Banner(text: problem, pulses: false)
+            if let problem = visibleDocumentProblem {
+                Banner(text: problem, pulses: false) { closedDocumentProblem = problem }
             }
-            let problems = model.alertLines
-            if !problems.isEmpty {
-                Banner(text: problems.joined(separator: "\n"), pulses: true)
+            if let alert = visibleAlert {
+                Banner(text: alert, pulses: true) { closedAlert = alert }
             }
             switch mode {
             case .show: ShowScreenView()
@@ -45,6 +46,9 @@ struct ContentView: View {
             }
         }
         .background(modeShortcuts)
+        // Once a problem clears, the same problem coming back shows again.
+        .onChange(of: model.alertLines.isEmpty) { if $0 { closedAlert = nil } }
+        .onChange(of: model.documentProblem == nil) { if $0 { closedDocumentProblem = nil } }
         .toolbar { toolbar }
         .onChange(of: model.isShowLocked) { if $0 { mode = .show } }
         .onAppear { if model.isShowLocked { mode = .show } }
@@ -78,11 +82,28 @@ struct ContentView: View {
         }
     }
 
-    /// ⌘1 and ⌘2 switch modes.
+    // A closed banner stays hidden until its text changes, so a new problem shows again.
+    private var visibleDocumentProblem: String? {
+        model.documentProblem.flatMap { $0 == closedDocumentProblem ? nil : $0 }
+    }
+
+    private var visibleAlert: String? {
+        let text = model.alertLines.joined(separator: "\n")
+        return text.isEmpty || text == closedAlert ? nil : text
+    }
+
+    /// ⌘1 and ⌘2 switch modes; Esc closes the warning banners.
     private var modeShortcuts: some View {
         ZStack {
             Button("Show") { mode = .show }.keyboardShortcut("1")
             Button("Edit") { mode = .edit }.keyboardShortcut("2").disabled(model.isShowLocked)
+            if visibleDocumentProblem != nil || visibleAlert != nil {
+                Button("Close Warnings") {
+                    closedDocumentProblem = visibleDocumentProblem ?? closedDocumentProblem
+                    closedAlert = visibleAlert ?? closedAlert
+                }
+                .keyboardShortcut(.cancelAction)
+            }
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -206,13 +227,25 @@ struct SourceStatusLabel: View {
 struct Banner: View {
     let text: String
     let pulses: Bool
+    let onClose: () -> Void
     @State private var dim = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Label(text, systemImage: "exclamationmark.triangle.fill")
+        HStack(alignment: .top, spacing: 12) {
+            Label(text, systemImage: "exclamationmark.triangle.fill")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.updatesFrequently)
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(.system(size: 15, weight: .bold))
+            }
+            .buttonStyle(.borderless)
+            .foregroundColor(.white)
+            .help("Close this warning (Esc). It shows again if the problem changes.")
+            .accessibilityLabel("Close warning")
+        }
             .font(.system(size: 19, weight: .semibold))
-            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .foregroundColor(.white)
@@ -220,8 +253,6 @@ struct Banner: View {
             .opacity(dim ? 0.35 : 1)
             .padding([.horizontal, .top], 16)
             .textSelection(.enabled)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.updatesFrequently)
             .onAppear {
                 guard pulses, !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { dim = true }
