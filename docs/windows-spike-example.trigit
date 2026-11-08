@@ -1,0 +1,99 @@
+{
+  "format" : "TrigIT Set",
+  "set" : {
+    "destinations" : [
+      {
+        "dmxHost" : "2.255.255.255",
+        "dmxInterface" : null,
+        "dmxRefreshRate" : 30,
+        "dmxSourceName" : "TrigIT",
+        "host" : "127.0.0.1",
+        "id" : "8264189127656151197",
+        "name" : "OSC monitor",
+        "port" : 9000,
+        "sacnPriority" : 100,
+        "usesDMX" : false,
+        "usesMIDI" : false,
+        "usesOSC" : true
+      }
+    ],
+    "id" : "17141352891042713130",
+    "name" : "Windows spike example",
+    "songs" : [
+      {
+        "end" : "00:00:59:23",
+        "id" : "7512647675980935240",
+        "name" : "Song 1",
+        "start" : "00:00:10:00",
+        "startActions" : [
+          {
+            "destination" : "8264189127656151197",
+            "id" : "2702271105743126083",
+            "osc" : {
+              "address" : "/trigit/song",
+              "arguments" : [
+                {
+                  "int" : 1
+                }
+              ]
+            },
+            "type" : "osc"
+          }
+        ],
+        "stopActions" : [
+
+        ]
+      },
+      {
+        "end" : "00:01:59:23",
+        "id" : "10999575842387338226",
+        "name" : "Song 2",
+        "start" : "00:01:00:00",
+        "startActions" : [
+          {
+            "destination" : "8264189127656151197",
+            "id" : "10314657406474635354",
+            "osc" : {
+              "address" : "/trigit/song",
+              "arguments" : [
+                {
+                  "int" : 2
+                }
+              ]
+            },
+            "type" : "osc"
+          }
+        ],
+        "stopActions" : [
+
+        ]
+      },
+      {
+        "end" : "00:02:59:23",
+        "id" : "16492263159042857188",
+        "name" : "Song 3",
+        "start" : "00:02:00:00",
+        "startActions" : [
+          {
+            "destination" : "8264189127656151197",
+            "id" : "385274452363643765",
+            "osc" : {
+              "address" : "/trigit/song",
+              "arguments" : [
+                {
+                  "int" : 3
+                }
+              ]
+            },
+            "type" : "osc"
+          }
+        ],
+        "stopActions" : [
+
+        ]
+      }
+    ],
+    "stopTime" : 2
+  },
+  "version" : 1
+}
