@@ -84,8 +84,6 @@ public enum FiringCause: Hashable, Sendable {
 
 /// Why a Song Ended.
 public enum EndingCause: Hashable, Sendable {
-    /// Timecode stopped while the Playhead was inside it.
-    case stop
     /// The Playhead played on past its end time.
     case playedPastEnd
     /// Its Stop Note arrived.
@@ -150,6 +148,9 @@ public struct ShowEngine: Sendable {
 
     /// True from a Stop until timecode comes back.
     public private(set) var isStopped = false
+    /// True from a Stop until the next reading: the current Song stays current,
+    /// but timecode resuming inside it fires its Start Actions again.
+    private var rearmed = false
 
     /// The Timecode Source being followed. It changes only when it is lost
     /// while the other is healthy, and returns to the Primary on a Stop.
@@ -238,7 +239,9 @@ public struct ShowEngine: Sendable {
         lastReading = reading
 
         let songID = set.song(at: reading.timecode)?.id
-        guard songID != timecodeSongID else { return events }
+        let restarted = rearmed
+        rearmed = false
+        guard songID != timecodeSongID || (restarted && songID != nil) else { return events }
         let left = timecodeSongID
         timecodeSongID = songID
         // Only leaving the current Song matters; one a note displaced is gone already.
@@ -255,7 +258,7 @@ public struct ShowEngine: Sendable {
         // by playing or by a Jump. Staying inside the same Song never fires
         // again, nor does arriving in a Song its Start Note already made current.
         if let songID {
-            guard songID != currentSongID else { return events }
+            guard songID != currentSongID || restarted else { return events }
             events += enter(songID, cause: .entering)
         } else if leftCurrent {
             currentSongID = nil
@@ -265,8 +268,9 @@ public struct ShowEngine: Sendable {
     }
 
     private mutating func enter(_ songID: SongID, cause: FiringCause) -> [EngineEvent] {
+        let changed: [EngineEvent] = songID == currentSongID ? [] : [.currentSongChanged(songID)]
         currentSongID = songID
-        return [.currentSongChanged(songID), .fired(songID, cause)]
+        return changed + [.fired(songID, cause)]
             + sends(for: songID, \.startActions, reason: .entering)
     }
 
@@ -295,8 +299,9 @@ public struct ShowEngine: Sendable {
     }
 
     /// Lets time pass with no reading. When the source has been silent for
-    /// longer than the Set's Stop time, that is a Stop: the current Song Ends
-    /// and is re-armed, so timecode resuming inside it fires it again.
+    /// longer than the Set's Stop time, that is a Stop. A Stop is not an End:
+    /// no Stop Actions are sent and the current Song stays current, but it is
+    /// re-armed, so timecode resuming inside it fires its Start Actions again.
     public mutating func tick(at time: Double) -> [EngineEvent] {
         guard !isStopped, let last = lastReading, time - last.timestamp > set.stopTime else {
             return updateHealth(at: time)
@@ -305,13 +310,8 @@ public struct ShowEngine: Sendable {
         // After a Stop, the next reading starts afresh: neither a Jump nor a Dropout.
         lastReading = nil
         resumedAt = nil
+        rearmed = true
         var events: [EngineEvent] = [.stopped]
-        timecodeSongID = nil
-        if let current = currentSongID {
-            events += end(current, cause: .stop)
-            currentSongID = nil
-            events.append(.currentSongChanged(nil))
-        }
         // A Stop returns the show to the Primary Source.
         if liveSource != .primary {
             liveSource = .primary

@@ -26,7 +26,7 @@ A discontinuity in the Playhead: timecode arriving at a position that is not the
 _Avoid_: Seek, scrub, locate
 
 **Stop**:
-Timecode ceasing from every Timecode Source for longer than a set time, as when Ableton's transport stops. Shorter gaps are Dropouts.
+Timecode ceasing from every Timecode Source for longer than a set time, as when Ableton's transport stops. Shorter gaps are Dropouts. A Stop is not Ending: the current Song stays current and sends no Stop Actions, but it is re-armed, so timecode restarting inside it fires its Start Actions again.
 _Avoid_: Pause, halt
 
 **Dropout**:
@@ -56,7 +56,7 @@ The Actions a Song sends on Entering.
 _Avoid_: On-enter, cue
 
 **Stop Actions**:
-The optional Actions a Song sends on Ending, used for example for a DJ pull-up that must tell other gear the set has stopped. Usually empty.
+The optional Actions a Song sends on Ending, used for example to tell other gear a DJ pull-up is over when its Stop Note arrives or the Playhead passes its end time. Never sent on a Stop. Usually empty.
 _Avoid_: Exit actions, release, off-cue
 
 **Destination**:
@@ -76,7 +76,7 @@ A Song becoming the current Song: the Playhead arriving inside its span from out
 _Avoid_: Hitting, reaching
 
 **Ending**:
-The current Song finishing: a Stop while it is current, the Playhead playing on past its end time, or its Stop Note arriving. A Jump out of a Song is not Ending. A Song Ends at most once per Entering.
+The current Song finishing: the Playhead playing on past its end time, or its Stop Note arriving. A Stop is not Ending, nor is a Jump out of a Song. A Song Ends at most once per Entering.
 _Avoid_: Exiting, leaving, release
 
 **Firing**:
