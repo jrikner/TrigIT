@@ -268,14 +268,16 @@ final class ShowModel: ObservableObject {
 
     // MARK: Songs
 
-    func addSong() {
+    /// Adds a Song in the next free hour; returns its ID, or nil if refused.
+    @discardableResult
+    func addSong() -> SongID? {
         let start = nextFreeHour()
         let song = Song(
             name: "Song \(set.songs.count + 1)",
             start: start,
             end: Timecode(hours: start.hours, minutes: 5, seconds: 0, frames: 0)!
         )
-        update(song)
+        return update(song) ? song.id : nil
     }
 
     func deleteSong(_ id: SongID) {

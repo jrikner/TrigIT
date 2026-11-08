@@ -148,9 +148,10 @@ public struct ShowEngine: Sendable {
 
     /// True from a Stop until timecode comes back.
     public private(set) var isStopped = false
-    /// True from a Stop until the next reading: the current Song stays current,
-    /// but timecode resuming inside it fires its Start Actions again.
-    private var rearmed = false
+    /// Where timecode was at a Stop, until the next reading. The current Song
+    /// stays current but is re-armed: timecode resuming inside it fires its
+    /// Start Actions again.
+    private var stoppedAt: Timecode?
 
     /// The Timecode Source being followed. It changes only when it is lost
     /// while the other is healthy, and returns to the Primary on a Stop.
@@ -220,6 +221,14 @@ public struct ShowEngine: Sendable {
         }
 
         var jumped = false
+        let restarted = stoppedAt != nil
+        // Resuming after a Stop somewhere other than where it stopped is a
+        // relocation: like a Jump, it Ends nothing.
+        let relocated = stoppedAt.map { stopped in
+            abs(Double(stopped.frameIndex(at: reading.frameRate) - reading.timecode.frameIndex(at: reading.frameRate)))
+                > Self.jumpToleranceFrames
+        } ?? false
+        stoppedAt = nil
         if let previous = lastReading {
             let gap = reading.timestamp - previous.timestamp
             if gap > Self.dropoutThreshold {
@@ -239,8 +248,6 @@ public struct ShowEngine: Sendable {
         lastReading = reading
 
         let songID = set.song(at: reading.timecode)?.id
-        let restarted = rearmed
-        rearmed = false
         guard songID != timecodeSongID || (restarted && songID != nil) else { return events }
         let left = timecodeSongID
         timecodeSongID = songID
@@ -249,7 +256,7 @@ public struct ShowEngine: Sendable {
 
         // Leaving a Song by playing on past its end time Ends it, before the next
         // Song fires. A Jump out of a Song, or playing backwards out of it, does not.
-        if leftCurrent, let left, !jumped,
+        if leftCurrent, let left, !jumped, !relocated,
            let song = set.songs.first(where: { $0.id == left }), reading.timecode > song.end {
             events += end(left, cause: .playedPastEnd)
         }
@@ -310,7 +317,7 @@ public struct ShowEngine: Sendable {
         // After a Stop, the next reading starts afresh: neither a Jump nor a Dropout.
         lastReading = nil
         resumedAt = nil
-        rearmed = true
+        stoppedAt = last.timecode
         var events: [EngineEvent] = [.stopped]
         // A Stop returns the show to the Primary Source.
         if liveSource != .primary {
