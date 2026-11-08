@@ -9,6 +9,8 @@ struct SetEditorView: View {
     @EnvironmentObject private var model: ShowModel
     @State private var selection: SongID?
     @State private var importReport: ImportSummary?
+    /// The Song whose name field should take focus, with its text selected.
+    @State private var renaming: SongID?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -16,16 +18,23 @@ struct SetEditorView: View {
                 List(selection: $selection) {
                     ForEach(model.set.songs) { song in
                         SongListRow(song: song).tag(song.id)
-                            .contextMenu {
-                                Button("Delete Song") { delete(song.id) }.disabled(model.isShowLocked)
-                            }
                     }
                 }
                 .listStyle(.inset)
+                // Double-click or Return on a row renames it.
+                .contextMenu(forSelectionType: SongID.self) { ids in
+                    if let id = ids.first, ids.count == 1 {
+                        Button("Rename") { rename(id) }.disabled(model.isShowLocked)
+                    }
+                    Button(ids.count > 1 ? "Delete Songs" : "Delete Song") { ids.forEach(delete) }
+                        .disabled(model.isShowLocked)
+                } primaryAction: { ids in
+                    if let id = ids.first, ids.count == 1 { rename(id) }
+                }
                 .onDeleteCommand { if let selection { delete(selection) } }
                 RowDivider()
                 HStack {
-                    Button { model.addSong(); selection = model.set.songs.last?.id } label: {
+                    Button { model.addSong(); if let id = model.set.songs.last?.id { rename(id) } } label: {
                         Label("Song", systemImage: "plus")
                     }
                     Button("Import CSV…") { importCSV() }
@@ -45,7 +54,7 @@ struct SetEditorView: View {
 
             Group {
                 if let selection, let song = model.song(selection) {
-                    SongDetail(song: song).id(song.id)
+                    SongDetail(song: song, renaming: $renaming).id(song.id)
                 } else {
                     Text("Select a Song")
                         .font(TrigType.body)
@@ -59,6 +68,12 @@ struct SetEditorView: View {
         .sheet(item: $importReport) { summary in
             ImportReportView(summary: summary)
         }
+    }
+
+    private func rename(_ id: SongID) {
+        guard !model.isShowLocked else { return }
+        selection = id
+        renaming = id
     }
 
     private func delete(_ id: SongID) {
@@ -129,7 +144,10 @@ extension NoteTrigger {
 struct SongDetail: View {
     @EnvironmentObject private var model: ShowModel
     let song: Song
+    @Binding var renaming: SongID?
     @SceneStorage("songTab") private var tab = "timing"
+    @FocusState private var nameFocused: Bool
+    @State private var nameHovered = false
 
     var body: some View {
         ScrollView {
@@ -142,7 +160,25 @@ struct SongDetail: View {
                     }))
                     .textFieldStyle(.plain)
                     .font(TrigType.pageTitle)
+                    .focused($nameFocused)
+                    .onSubmit { nameFocused = false }
+                    // Looks like a heading until hovered or focused, then like a field.
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(nameFocused || (nameHovered && !model.isShowLocked) ? Surface.selection : .clear)
+                    )
+                    .padding(.horizontal, -6)
+                    .onHover { nameHovered = $0 }
                     .disabled(model.isShowLocked)
+                    .help(model.isShowLocked ? "Unlock the Show to rename this Song" : "Song name: click to rename")
+                    if !model.isShowLocked {
+                        Image(systemName: "pencil")
+                            .foregroundColor(.secondary)
+                            .opacity(nameHovered || nameFocused ? 1 : 0)
+                            .accessibilityHidden(true)
+                    }
                     // Manual firing works under Show Lock and while disarmed.
                     Button { model.fire(song.id) } label: { Label("Fire", systemImage: "play.fill") }
                         .capsuleButton()
@@ -167,6 +203,15 @@ struct SongDetail: View {
             }
             .padding(EdgeInsets(top: 16, leading: 32, bottom: 28, trailing: 32))
         }
+        .onAppear(perform: takeRenameRequest)
+        .onChange(of: renaming) { _ in takeRenameRequest() }
+    }
+
+    /// Focusing an AppKit text field selects all its text, so typing replaces "Song N".
+    private func takeRenameRequest() {
+        guard renaming == song.id else { return }
+        renaming = nil
+        DispatchQueue.main.async { nameFocused = true }
     }
 }
 
