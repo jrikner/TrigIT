@@ -26,7 +26,7 @@ A discontinuity in the Playhead: timecode arriving at a position that is not the
 _Avoid_: Seek, scrub, locate
 
 **Stop**:
-Timecode ceasing from every Timecode Source for longer than a set time, as when Ableton's transport stops. Shorter gaps are Dropouts. A Stop is not Ending: the current Song stays current and sends no Stop Actions, but it is re-armed, so timecode restarting inside it fires its Start Actions again.
+Timecode ceasing from every Timecode Source for longer than a set time, as when Ableton's transport stops. Shorter gaps are Dropouts. A Stop is not Ending: the current Song stays current and sends no Stop Actions, but it is re-armed, so timecode restarting inside it fires its Start Actions again. Timecode resuming somewhere else after a Stop is treated like a Jump: it Ends nothing.
 _Avoid_: Pause, halt
 
 **Dropout**:

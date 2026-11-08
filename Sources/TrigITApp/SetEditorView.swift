@@ -26,15 +26,17 @@ struct SetEditorView: View {
                     if let id = ids.first, ids.count == 1 {
                         Button("Rename") { rename(id) }.disabled(model.isShowLocked)
                     }
-                    Button(ids.count > 1 ? "Delete Songs" : "Delete Song") { ids.forEach(delete) }
-                        .disabled(model.isShowLocked)
+                    if !ids.isEmpty {
+                        Button(ids.count > 1 ? "Delete Songs" : "Delete Song") { ids.forEach(delete) }
+                            .disabled(model.isShowLocked)
+                    }
                 } primaryAction: { ids in
                     if let id = ids.first, ids.count == 1 { rename(id) }
                 }
                 .onDeleteCommand { if let selection { delete(selection) } }
                 RowDivider()
                 HStack {
-                    Button { model.addSong(); if let id = model.set.songs.last?.id { rename(id) } } label: {
+                    Button { if let id = model.addSong() { rename(id) } } label: {
                         Label("Song", systemImage: "plus")
                     }
                     Button("Import CSV…") { importCSV() }

@@ -148,9 +148,28 @@ final class FiringRulesTests: XCTestCase {
         timeline.play(from: "01:00:19:15", frames: 11) // ends on 01:00:20:00, B's last frame
         XCTAssertEqual(timeline.engine.playhead, tc("01:00:20:00"))
         timeline.silence(5)
-        timeline.play(from: "01:00:21:00", frames: 10) // resuming in the gap after B
+        timeline.play(from: "01:00:20:01", frames: 10) // resumes where it stopped, into the gap after B
         XCTAssertEqual(timeline.ended, [.ended(songB.id, .playedPastEnd)])
         XCTAssertEqual(timeline.sends.map(\.action), [startB, stopB])
+    }
+
+    func testResumingElsewhereAfterAStopIsNotAnEnd() {
+        let timeline = makeTimeline()
+        timeline.play(from: "01:00:05:00", frames: 10)
+        timeline.silence(3)
+        timeline.play(from: "02:00:01:00", frames: 10) // the operator relocated to C
+        XCTAssertEqual(timeline.ended, [])
+        XCTAssertEqual(timeline.sends.map(\.action), [startA])
+        XCTAssertEqual(timeline.engine.currentSongID, songC.id)
+    }
+
+    func testResumingInTheGapAfterAStopClearsTheCurrentSongWithoutEndingIt() {
+        let timeline = makeTimeline()
+        timeline.play(from: "01:00:05:00", frames: 10)
+        timeline.silence(3)
+        timeline.play(from: "01:30:00:00", frames: 10)
+        XCTAssertEqual(timeline.ended, [])
+        XCTAssertNil(timeline.engine.currentSongID)
     }
 
     func testADropoutAcrossTheEndStillEndsTheSong() {
