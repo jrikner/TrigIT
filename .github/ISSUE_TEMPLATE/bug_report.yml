@@ -1,0 +1,79 @@
+name: Bug report
+description: Something TrigIT did wrong, or failed to do
+labels: [needs-triage]
+body:
+  - type: checkboxes
+    id: live
+    attributes:
+      label: Live show
+      options:
+        - label: Did this happen during a live show?
+  - type: input
+    id: trigit-version
+    attributes:
+      label: TrigIT version
+      description: TrigIT → About TrigIT
+      placeholder: 1.0 (45)
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: macOS 26.1
+    validations:
+      required: true
+  - type: input
+    id: mac-model
+    attributes:
+      label: Mac model
+      placeholder: MacBook Pro 14" M3, 2023
+    validations:
+      required: true
+  - type: dropdown
+    id: timecode-source
+    attributes:
+      label: Timecode Source
+      multiple: true
+      options:
+        - LTC
+        - MTC
+        - Art-Net Timecode
+        - Simulator
+        - None / not relevant
+    validations:
+      required: true
+  - type: input
+    id: sender
+    attributes:
+      label: Timecode sender
+      description: What sends the timecode, and through what device
+      placeholder: Ableton Live 12 → RME Fireface UCX II, input 3
+  - type: checkboxes
+    id: destinations
+    attributes:
+      label: Destination types involved
+      options:
+        - label: OSC
+        - label: MIDI notes
+        - label: MIDI Show Control
+        - label: Art-Net (ArtDmx)
+        - label: sACN
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you did, what you expected, and what happened instead
+      placeholder: |
+        1. Armed the Set, played timecode from 00:59:50:00
+        2. Song "Intro" started at 01:00:00:00
+        3. Expected its Start Actions to fire; nothing was sent to the grandMA3
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Daily log
+      description: Attach the log for the day it happened, from `~/Library/Logs/TrigIT/<date>.log` (e.g. `2026-11-08.log`). Drag the file into this box.
+    validations:
+      required: true
