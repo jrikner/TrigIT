@@ -94,7 +94,8 @@ final class FailoverTests: XCTestCase {
         show.play(from: "01:00:01:00", seconds: 2, primary: true, backup: true)
         show.silence(3)
         XCTAssertEqual(show.events.filter { $0 == .stopped }.count, 1)
-        XCTAssertEqual(show.events.filter { if case .ended = $0 { return true } else { return false } }.count, 1)
+        // A Stop is not an End.
+        XCTAssertEqual(show.events.filter { if case .ended = $0 { return true } else { return false } }.count, 0)
         // The alert shows while timecode is lost, then a Stop is normal and clears it.
         XCTAssertEqual(show.alerts, [.allTimecodeLost, nil])
         show.play(seconds: 1, primary: true, backup: true)

@@ -60,6 +60,17 @@ final class NoteTriggerTests: XCTestCase {
         XCTAssertEqual(timeline.engine.currentSongID, songA.id)
     }
 
+    func testAStopNoteAfterATimecodeStopEndsTheSongAndSendsItsStopActions() {
+        let timeline = makeTimeline()
+        timeline.play(from: "01:00:01:00", frames: 25)
+        timeline.silence(3)
+        timeline.clearEvents()
+        timeline.midi(noteOn(stopNoteA))
+        XCTAssertEqual(timeline.ended, [.ended(songA.id, .note)])
+        XCTAssertEqual(timeline.sends.map(\.action), [stopA])
+        XCTAssertNil(timeline.engine.currentSongID)
+    }
+
     func testAStopNoteForTheCurrentSongSendsItsStopActionsOnce() {
         let timeline = makeTimeline()
         timeline.play(from: "01:00:01:00", frames: 25)
@@ -70,15 +81,6 @@ final class NoteTriggerTests: XCTestCase {
         XCTAssertEqual(timeline.ended, [.ended(songA.id, .note)])
         XCTAssertEqual(timeline.sends.map(\.action), [stopA])
         XCTAssertNil(timeline.engine.currentSongID)
-    }
-
-    func testAStopNoteAfterATimecodeStopSendsNothing() {
-        let timeline = makeTimeline()
-        timeline.play(from: "01:00:01:00", frames: 25)
-        timeline.silence(3)
-        timeline.clearEvents()
-        timeline.midi(noteOn(stopNoteA))
-        XCTAssertEqual(timeline.events, [])
     }
 
     func testATimecodeStopAfterTheStopNoteSendsNothing() {
@@ -111,15 +113,15 @@ final class NoteTriggerTests: XCTestCase {
         XCTAssertEqual(timeline.engine.currentSongID, songA.id)
     }
 
-    func testASongWithOnlyAStartNoteStaysCurrentUntilATimecodeStop() {
+    func testASongWithOnlyAStartNoteStaysCurrentThroughATimecodeStop() {
         let timeline = makeTimeline()
         timeline.play(from: "00:59:00:00", frames: 25) // timecode outside every Song
         timeline.midi(noteOn(noteB))
         timeline.play(frames: 50)
         XCTAssertEqual(timeline.engine.currentSongID, songP.id)
         timeline.silence(3)
-        XCTAssertEqual(timeline.ended, [.ended(songP.id, .stop)])
-        XCTAssertNil(timeline.engine.currentSongID)
+        XCTAssertEqual(timeline.ended, [])
+        XCTAssertEqual(timeline.engine.currentSongID, songP.id)
     }
 
     func testASongWithOnlyAStartNoteStaysCurrentUntilAnotherSongIsEntered() {

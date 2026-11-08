@@ -358,7 +358,7 @@ struct SongActionsEditor: View {
                         ActionRow(songID: song.id, list: .stop, action: action)
                     }
                 }
-                Footnote("Usually empty; for DJ pull-ups that must tell other gear the set has stopped.")
+                Footnote("Usually empty. Sent when the Playhead passes the end time or the Stop Note arrives, never on a timecode Stop.")
             }
             if model.set.destinations.isEmpty {
                 Footnote("Add a Destination first, in Destinations.")

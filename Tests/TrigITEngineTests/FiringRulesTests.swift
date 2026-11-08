@@ -40,10 +40,11 @@ final class FiringRulesTests: XCTestCase {
         timeline.play(from: "01:00:01:00", frames: 25)
         timeline.silence(2.1)
         XCTAssertEqual(timeline.events.filter { $0 == .stopped }.count, 1)
-        XCTAssertNil(timeline.engine.currentSongID)
+        XCTAssertEqual(timeline.engine.currentSongID, songA.id)
         timeline.play(frames: 25) // Ableton plays again from where it stopped
         XCTAssertEqual(timeline.fired, [songA.id, songA.id])
-        XCTAssertEqual(timeline.sends.map(\.action), [startA, stopA, startA])
+        XCTAssertEqual(timeline.sends.map(\.action), [startA, startA])
+        XCTAssertEqual(timeline.ended, [])
     }
 
     func testTheStopTimeComesFromTheSet() {
@@ -79,13 +80,24 @@ final class FiringRulesTests: XCTestCase {
 
     // MARK: Ending
 
-    func testAStopInsideASongSendsItsStopActions() {
+    func testAStopInsideASongIsNotAnEndAndTheSongStaysCurrent() {
         let timeline = makeTimeline()
         timeline.play(from: "01:00:05:00", frames: 10)
         timeline.silence(3)
-        XCTAssertTrue(timeline.events.contains(.ended(songA.id, .stop)))
-        XCTAssertEqual(timeline.sends.map(\.action), [startA, stopA])
-        XCTAssertEqual(timeline.sends.last?.reason, .ending)
+        XCTAssertTrue(timeline.events.contains(.stopped))
+        XCTAssertEqual(timeline.ended, [])
+        XCTAssertEqual(timeline.sends.map(\.action), [startA])
+        XCTAssertEqual(timeline.engine.currentSongID, songA.id)
+        XCTAssertFalse(timeline.songChanges.contains(nil))
+    }
+
+    func testPlayingPastTheEndAfterAStopStillEndsTheSong() {
+        let timeline = makeTimeline()
+        timeline.play(from: "01:00:09:00", frames: 10)
+        timeline.silence(3)
+        timeline.play(frames: 30) // resumes where it stopped and plays on into B
+        XCTAssertEqual(timeline.ended, [.ended(songA.id, .playedPastEnd)])
+        XCTAssertEqual(timeline.sends.map(\.action), [startA, startA, stopA, startB])
     }
 
     func testAStopInAGapEndsNothing() {
@@ -131,13 +143,13 @@ final class FiringRulesTests: XCTestCase {
         XCTAssertFalse(timeline.ended.contains(.ended(songB.id, .playedPastEnd)))
     }
 
-    func testAStopOnTheLastFrameSendsStopActionsExactlyOnce() {
+    func testResumingPastTheEndAfterAStopOnTheLastFrameEndsItExactlyOnce() {
         let timeline = makeTimeline()
         timeline.play(from: "01:00:19:15", frames: 11) // ends on 01:00:20:00, B's last frame
         XCTAssertEqual(timeline.engine.playhead, tc("01:00:20:00"))
         timeline.silence(5)
         timeline.play(from: "01:00:21:00", frames: 10) // resuming in the gap after B
-        XCTAssertEqual(timeline.ended, [.ended(songB.id, .stop)])
+        XCTAssertEqual(timeline.ended, [.ended(songB.id, .playedPastEnd)])
         XCTAssertEqual(timeline.sends.map(\.action), [startB, stopB])
     }
 
@@ -152,10 +164,10 @@ final class FiringRulesTests: XCTestCase {
 
     func testASongEndsOnlyOncePerEntering() {
         let timeline = makeTimeline()
-        timeline.play(from: "01:00:05:00", frames: 5)
+        timeline.play(from: "01:00:09:20", frames: 10)
         timeline.silence(3)
         timeline.silence(3)
-        XCTAssertEqual(timeline.ended.count, 1)
+        XCTAssertEqual(timeline.ended, [.ended(songA.id, .playedPastEnd)])
     }
 
     // MARK: Disarmed and manual
@@ -165,7 +177,7 @@ final class FiringRulesTests: XCTestCase {
         timeline.play(from: "01:00:09:20", frames: 10)
         timeline.silence(3)
         XCTAssertEqual(timeline.sends, [])
-        XCTAssertEqual(timeline.ended, [.ended(songA.id, .playedPastEnd), .ended(songB.id, .stop)])
+        XCTAssertEqual(timeline.ended, [.ended(songA.id, .playedPastEnd)])
     }
 
     func testManualFireSendsStartActionsEvenWhileDisarmed() {
@@ -196,8 +208,7 @@ final class FiringRulesTests: XCTestCase {
         var set = ShowSet(songs: [songA], destinations: [], stopTime: 2)
         set.songs[0].startActions = []
         let timeline = Timeline(set: set, armed: true)
-        timeline.play(from: "01:00:05:00", frames: 5)
-        timeline.silence(3)
+        timeline.play(from: "01:00:09:20", frames: 10) // plays past A's end
         XCTAssertTrue(timeline.events.contains(.missingDestination(song: songA.id, action: stopA.id)))
     }
 

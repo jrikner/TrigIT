@@ -768,7 +768,6 @@ final class ShowModel: ObservableObject {
             let name = song(id)?.name ?? "?"
             let how: String
             switch cause {
-            case .stop: how = "timecode stopped"
             case .playedPastEnd: how = "played past its end"
             case .note: how = "its Stop Note"
             case .manual: how = "Fire stop by hand"
