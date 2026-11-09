@@ -45,20 +45,20 @@ public struct SpikeSession {
     }
 
     public private(set) var engine: ShowEngine
-    private let startedAt: Double
+    let startedAt: Double
     private var sources: [TimecodeSourceKind: SourceStats] = [:]
-    private var fires: [Fire] = []
+    private(set) var fires: [Fire] = []
     private var latencies: [Double] = []
     private var tickIntervals: [Double] = []
     private var lastTick: Double?
-    private var failedSends = 0
+    private(set) var failedSends = 0
     private var skippedActions = 0
     private var ignoredPackets = 0
     private var dropouts: [Double] = []
     private var stops = 0
     private var sourceLosses = 0
-    private var doubleFires = 0
-    private var missedFires = 0
+    private(set) var doubleFires = 0
+    private(set) var missedFires = 0
     /// The Song that fired and has neither been left nor Stopped since.
     private var firedAndStillIn: SongID?
     /// The previous reading's timecode, nil after a Stop or before any reading.

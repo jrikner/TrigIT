@@ -14,6 +14,7 @@
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <avrt.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -134,6 +135,70 @@ int64_t cwio_udp_listen(uint16_t port, char *error, int32_t error_size) {
 int32_t cwio_udp_receive(int64_t socket, uint8_t *buffer, int32_t size) {
     int count = recv((SOCKET)socket, (char *)buffer, size, 0);
     return count == SOCKET_ERROR ? -1 : count;
+}
+
+// MARK: The browser UI's HTTP listener
+
+int64_t cwio_tcp_listen(uint16_t port, char *error, int32_t error_size) {
+    if (!winsock_ready(error, error_size)) return -1;
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) {
+        set_error(error, error_size, "socket failed (Winsock error %ld)", WSAGetLastError());
+        return -1;
+    }
+    // Fail rather than share the port: two apps answering one address is confusing.
+    BOOL yes = TRUE;
+    setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *)&yes, sizeof yes);
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof address);
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    // Loopback only: no one else on the show network can reach the UI.
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(s, (struct sockaddr *)&address, sizeof address) == SOCKET_ERROR || listen(s, 8) == SOCKET_ERROR) {
+        set_error(error, error_size, "could not open the TCP port (Winsock error %ld)", WSAGetLastError());
+        closesocket(s);
+        return -1;
+    }
+    return (int64_t)s;
+}
+
+int64_t cwio_tcp_accept(int64_t listener) {
+    SOCKET s = accept((SOCKET)listener, NULL, NULL);
+    if (s == INVALID_SOCKET) return -1;
+    // A browser that stalls mid-request must not hold the listener for long.
+    DWORD timeout = 2000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof timeout);
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&timeout, sizeof timeout);
+    return (int64_t)s;
+}
+
+int32_t cwio_tcp_read_request(int64_t connection, uint8_t *buffer, int32_t size) {
+    int32_t total = 0;
+    while (total < size) {
+        int count = recv((SOCKET)connection, (char *)buffer + total, size - total, 0);
+        if (count <= 0) return total > 0 ? total : -1;
+        total += count;
+        for (int32_t i = 3; i < total; i++) {
+            if (buffer[i - 3] == '\r' && buffer[i - 2] == '\n' && buffer[i - 1] == '\r' && buffer[i] == '\n') return total;
+        }
+    }
+    return total;
+}
+
+void cwio_tcp_send_and_close(int64_t connection, const uint8_t *bytes, int32_t count) {
+    int32_t sent = 0;
+    while (sent < count) {
+        int n = send((SOCKET)connection, (const char *)bytes + sent, count - sent, 0);
+        if (n <= 0) break;
+        sent += n;
+    }
+    shutdown((SOCKET)connection, SD_SEND);
+    closesocket((SOCKET)connection);
+}
+
+void cwio_open_url(const char *url) {
+    ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
 }
 
 int64_t cwio_udp_sender(char *error, int32_t error_size) {

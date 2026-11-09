@@ -4,7 +4,7 @@
 ///
 ///     TrigITWindows <set.trigit> [--source artnet|ltc]... [--ltc-device <name>]
 ///                   [--ltc-channel <n>] [--artnet-port <port>] [--report <file>]
-///                   [--duration <seconds>]
+///                   [--duration <seconds>] [--ui-port <port>] [--no-browser]
 ///     TrigITWindows --list-devices
 ///
 /// The first `--source` is the Primary Source, a second one the Backup Source.
@@ -26,6 +26,10 @@ public struct SpikeOptions: Equatable, Sendable {
     /// Stop by itself after this many seconds; nil: run until Ctrl+C.
     public var duration: Double?
     public var listDevices = false
+    /// The browser UI's port on 127.0.0.1; 0: no UI.
+    public var uiPort: UInt16 = 7319
+    /// Don't open the UI in the default browser at start.
+    public var noBrowser = false
 
     public init() {}
 
@@ -41,6 +45,8 @@ public struct SpikeOptions: Equatable, Sendable {
           --artnet-port <port>  UDP port for Art-Net Timecode (default: 6454)
           --report <file>       where to write the timing report (default: TrigIT-timing-report-<time>.txt)
           --duration <seconds>  stop by itself after this long (default: run until Ctrl+C)
+          --ui-port <port>      the browser UI at http://127.0.0.1:<port>, 0 for none (default: 7319)
+          --no-browser          serve the UI but don't open the browser
         """
 
     public struct ParseError: Error, Equatable, CustomStringConvertible {
@@ -84,6 +90,13 @@ public struct SpikeOptions: Equatable, Sendable {
                     throw ParseError(description: "--duration must be a positive number of seconds")
                 }
                 duration = seconds
+            case "--ui-port":
+                guard let port = UInt16(try value(for: argument)) else {
+                    throw ParseError(description: "--ui-port must be 0 to 65535")
+                }
+                uiPort = port
+            case "--no-browser":
+                noBrowser = true
             case "--list-devices":
                 listDevices = true
             case "-h", "--help":

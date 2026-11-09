@@ -46,6 +46,7 @@ That is fine as it is: the timing is measured whether or not anything listens. T
 
 3. When Windows Firewall asks, **allow access** on the network you are using (private networks are enough for most show networks). Without it, no timecode arrives.
 4. Play timecode across the Songs' start times: for example from 00:00:05:00 for 2½ minutes. Also try stopping and starting, and jumping around. The window prints a line for each Song that fires, and a status line every 5 seconds.
+   Your browser also opens TrigIT's page at <http://127.0.0.1:7319/>: the playhead, the current Song and the recent fires. Keep it open during the test and note anything that looks wrong or lags.
 5. Press **Ctrl+C**. The program writes `TrigIT-timing-report-<date>-<time>.txt` in the folder and tells you its name.
 
 If nothing arrives: check the sender sends Art-Net *Timecode* (not only DMX), that both are on the same network, and that the firewall allowed it. Another program on this PC holding UDP port 6454 can also block it; close it, or try `--artnet-port`.
@@ -97,6 +98,8 @@ Add a comment on [issue #60](https://github.com/jrikner/TrigIT/issues/60) and dr
 | `--artnet-port <port>` | The UDP port for Art-Net. Default: 6454. |
 | `--report <file>` | Where to write the report. |
 | `--duration <seconds>` | Stop by itself after this long, instead of waiting for Ctrl+C. |
+| `--ui-port <port>` | The port of the browser page at `http://127.0.0.1:<port>/`; `0` turns the page off. Default: 7319. |
+| `--no-browser` | Serve the page but don't open the browser. |
 
 The zip also has `ci-smoke-report.txt`: the report from GitHub's own test run on a cloud Windows machine, for comparison.
 
