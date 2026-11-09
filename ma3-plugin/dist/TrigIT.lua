@@ -1181,7 +1181,7 @@ modules["arguments"] = function()
 
 local M = {}
 
-M.USAGE = 'TrigIT accepts: "open", "start", "arm", "disarm", "toggle", "fire <Song>", "stop", "quit"'
+M.USAGE = 'TrigIT accepts: "open", "start", "arm", "disarm", "toggle", "fire <Song>", "stop", "screen <n>", "quit"'
 
 local PLAIN = { open = true, start = true, arm = true, disarm = true, toggle = true, stop = true, quit = true }
 
@@ -1194,6 +1194,11 @@ function M.parse(text)
         local song = rest:match('^"(.*)"$') or rest
         if song == "" then return nil, 'fire needs a Song name, as in "fire Intro"' end
         return { verb = "fire", song = song }
+    end
+    if verb == "screen" then
+        local n = tonumber(rest:match("^%d+$"))
+        if not n or n < 1 then return nil, 'screen needs a screen number, as in "screen 2"' end
+        return { verb = "screen", screen = n }
     end
     if PLAIN[verb] and rest == "" then return { verb = verb } end
     return nil, ('"%s" is not a TrigIT command. %s'):format(text, M.USAGE)
@@ -1819,7 +1824,7 @@ end
 local function build(overlay)
     local ui = {}
     local base = overlay:Append("BaseInput")
-    base.Name, base.W, base.H = PANEL, 1300, 720
+    base.Name = PANEL
     base.AutoClose, base.CloseOnEscape = "No", "Yes"
     rows(base, { 60, "*" })
     local title = base:Append("TitleBar")
@@ -1851,13 +1856,68 @@ local function build(overlay)
     ui.log = text(lists, "1,0")
 
     local buttons = frame:Append("UILayoutGrid")
-    buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 7, 1
+    buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 8, 1
     for i, entry in ipairs({ { "Load Set", "Load" }, { "Timecode", "Settings" }, { "Mode", "Mode" }, { "Fire Song", "Fire" },
-        { "Stop Song", "Stop" }, { "Import Show", "Import" }, { "Quit", "Quit" } }) do
+        { "Stop Song", "Stop" }, { "Import Show", "Import" }, { "Compact", "Size" }, { "Quit", "Quit" } }) do
         button(buttons, (i - 1) .. ",0", entry[1], entry[2])
     end
-    ui.base = base
+
+    -- Compact (#95): small enough to keep open next to the console's own views.
+    local small = base:Append("DialogFrame")
+    small.Anchors = { left = 0, right = 0, top = 1, bottom = 1 }
+    rows(small, { 90, 40 })
+    local line = small:Append("UILayoutGrid")
+    line.Anchors, line.Columns, line.Rows = "0,0", 4, 1
+    line[2][4].SizePolicy, line[2][4].Size = "Fixed", "110"
+    ui.compact = { playhead = text(line, "0,0", "console32", "Center"), song = text(line, "1,0", "Regular28", "Center") }
+    ui.compact.playhead.TextalignmentV, ui.compact.song.TextalignmentV = "Center", "Center"
+    ui.compact.arm = button(line, "2,0", "", "Arm")
+    ui.compact.arm.Font = "Regular28"
+    button(line, "3,0", "Full", "Size")
+    ui.compact.status = text(small, "0,1", "Regular18", "Center")
+    ui.compact.status.TextalignmentV = "Center"
+
+    ui.base, ui.full, ui.small = base, frame, small
     return ui
+end
+
+-- The panel's two sizes, each where it was last dragged to (MA sets X and Y,
+-- aligned Left and Top, when the title bar is dragged), else centred.
+local SIZES = { Full = { 1300, 720 }, Compact = { 760, 190 } }
+
+local function number(value) return tonumber(tostring(value)) end
+
+local function place(ui)
+    local size = state.compact and "Compact" or "Full"
+    local base, w, h = ui.base, SIZES[size][1], SIZES[size][2]
+    ui.full.Visible, ui.small.Visible = state.compact and "No" or "Yes", state.compact and "Yes" or "No"
+    base.W, base.H = w, h
+    local x, y = number(setting(size .. "X")), number(setting(size .. "Y"))
+    local display = base:Parent():Parent()
+    if x and y then
+        base.AlignmentH, base.AlignmentV = "Left", "Top"
+        base.X = math.max(0, math.min(x, (number(display.W) or w) - w))
+        base.Y = math.max(0, math.min(y, (number(display.H) or h) - h))
+    else
+        base.AlignmentH, base.AlignmentV, base.X, base.Y = "Center", "Center", 0, 0
+    end
+    ui.size, ui.x, ui.y = size, number(base.X), number(base.Y)
+end
+
+function actions.size()
+    state.compact = not state.compact
+    remember("Compact", state.compact and "Yes" or "No")
+    if state.ui and IsObjectValid(state.ui.base) then place(state.ui) end
+end
+
+-- Remembers a dragged panel's place, for its size.
+local function keepPlace(ui)
+    local x, y = number(ui.base.X), number(ui.base.Y)
+    if (x ~= ui.x or y ~= ui.y) and tostring(ui.base.AlignmentH) == "Left" then
+        remember(ui.size .. "X", x)
+        remember(ui.size .. "Y", y)
+        ui.x, ui.y = x, y
+    end
 end
 
 local function put(object, property, value)
@@ -1883,6 +1943,8 @@ local function render(ui, now)
     put(ui.song, "Text", currentName or "No Song")
     put(ui.arm, "Text", state.mode == "Bridge" and "BRIDGE" or armed and "ARMED" or "Disarmed")
     put(ui.arm, "BackColor", armed and RED or "Button.Background")
+    for _, field in ipairs({ "playhead", "song", "arm" }) do put(ui.compact[field], "Text", ui[field].Text) end
+    put(ui.compact.arm, "BackColor", armed and RED or "Button.Background")
 
     local running = state.lastMove and now - state.lastMove < 0.5
     local first = state.mode == "Bridge" and ("Bridge to %s, %d frames sent"):format(state.bridgeTo, state.frames or 0)
@@ -1894,6 +1956,8 @@ local function render(ui, now)
         or (state.notice ~= "" and state.notice)
     put(ui.status, "Text", warning or status)
     put(ui.status, "TextColor", warning and RED or "Global.Text")
+    put(ui.compact.status, "Text", warning or status)
+    put(ui.compact.status, "TextColor", warning and RED or "Global.Text")
 
     local songs = { " SONGS" }
     for _, song in ipairs(state.set and state.set.songs or {}) do
@@ -1912,13 +1976,27 @@ end
 -- The panel only shows TrigIT: closing it leaves the loop below running
 -- (#94), and running the plugin again opens a new panel on the same state.
 local function closePanel()
-    local panel = GetDisplayByIndex(1).ScreenOverlay:FindRecursive(PANEL)
-    if panel then panel:Parent():Remove(panel:Index()) end
+    for i = 1, 16 do
+        local display = GetDisplayByIndex(i)
+        if not display then return end
+        local panel = display.ScreenOverlay:FindRecursive(PANEL)
+        if panel then return panel:Parent():Remove(panel:Index()) end
+    end
+end
+
+local function displays()
+    local list, i = {}, 1
+    while GetDisplayByIndex(i) do list[i], i = GetDisplayByIndex(i), i + 1 end
+    return list
 end
 
 local function openPanel()
-    local overlay = GetDisplayByIndex(1).ScreenOverlay
-    if not overlay:FindRecursive(PANEL) then state.ui = build(overlay) end
+    for _, display in ipairs(displays()) do
+        if display.ScreenOverlay:FindRecursive(PANEL) then return end
+    end
+    local display = GetDisplayByIndex(number(setting("Screen")) or 1) or GetDisplayByIndex(1)
+    state.ui = build(display.ScreenOverlay)
+    place(state.ui)
 end
 
 -- One TrigIT at a time: each start writes a new run token to the show's
@@ -1932,6 +2010,15 @@ local function command(request)
     local verb = request.verb
     if verb == "open" then return openPanel() end
     if verb == "start" then return end -- running already: nothing to do
+    if verb == "screen" then
+        if not GetDisplayByIndex(request.screen) then
+            return ErrPrintf(("TrigIT: there is no screen %d here; there are %d"):format(request.screen, #displays()))
+        end
+        remember("Screen", request.screen)
+        local open = state.ui and IsObjectValid(state.ui.base)
+        return Printf(("TrigIT: the panel opens on screen %d%s"):format(request.screen,
+            open and " the next time you open it: close it first" or ""))
+    end
     if verb == "quit" then
         state.quit = true
         return Printf("TrigIT: stopping")
@@ -1999,7 +2086,8 @@ local function main(_, text)
     local token = ("%.6f-%d"):format(Time(), math.random(1, 1e9))
     state.token, state.quit = token, false
     remember(RUN, token)
-    for _, action in ipairs({ "Load", "Settings", "Mode", "Fire", "Stop", "Import", "Quit" }) do
+    state.compact = setting("Compact") == "Yes"
+    for _, action in ipairs({ "Load", "Settings", "Mode", "Fire", "Stop", "Import", "Size", "Quit" }) do
         signalTable["TrigIT" .. action] = function() state.pending = action:lower() end
     end
     signalTable.TrigITArm = function()
@@ -2042,6 +2130,7 @@ local function main(_, text)
             checkTwice()
             state.checked = now
             if setting(RUN) ~= token then state.token = nil end -- another TrigIT started, or another show was loaded
+            if state.ui and IsObjectValid(state.ui.base) then keepPlace(state.ui) end
         end
         if state.ui and IsObjectValid(state.ui.base) then render(state.ui, now) end
         coroutine.yield(0)

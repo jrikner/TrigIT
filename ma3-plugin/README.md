@@ -35,6 +35,7 @@ Run the plugin (tap it, or type `Plugin <n>`). It opens the TrigIT panel:
 - **Mode:** Standalone or Bridge, and for Bridge the Mac's IP address (or a broadcast address).
 - **Fire Song**, **Stop Song:** send a Song's Start or Stop Actions by hand, even while disarmed. Stop Song stops the current Song.
 - **Import Show:** write the Set as a Timecode Show (below), with the panel's slot and frame rate as defaults.
+- **Compact:** shrink the panel to the Playhead, the current Song, Armed and the status line, small enough to keep open next to the console's own views; **Full** brings the rest back. The console stays usable around the panel. Drag it by its title bar: each size reopens where you left it.
 - **Quit:** stop TrigIT. It disarms, stops following timecode and sends nothing until you run the plugin again. The panel stays, saying TrigIT stopped: close it with its ✖.
 
 The panel sends OSC on the In & Out line named `TrigIT <Destination>` (an import makes it), or else the first line with the Destination's IP and port. Closing the panel with its ✖ only hides it: TrigIT keeps following timecode and, while Armed, keeps sending. Run the plugin again to reopen the panel on the same Set, Armed state and log. Use **Quit** to stop it.
@@ -54,6 +55,7 @@ Put these in a macro, on an executor or on the command line, with the plugin's n
 | `Plugin TrigIT "arm"`, `"disarm"`, `"toggle"` | Arm or disarm |
 | `Plugin TrigIT "fire Intro"` | Send that Song's Start Actions, even while disarmed. The name isn't case-sensitive. |
 | `Plugin TrigIT "stop"` | Send the current Song's Stop Actions |
+| `Plugin TrigIT "screen 2"` | Open the panel on screen 2 from now on. If it is open, close it and open it again to move it. |
 | `Plugin TrigIT "quit"` | Stop TrigIT, as the Quit button does |
 
 They act on the running TrigIT. If it isn't running, any command but `quit` starts it first, with the Set, slot and mode it remembers, and only `open` (or no command) opens the panel. Each command says what it did in the System Monitor. In bridge mode the Mac app arms and fires, so `arm`, `fire` and `stop` say so and do nothing.
@@ -94,6 +96,7 @@ OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose 
 - The panel: Load Set, Timecode, Fire Song and Import Show open their dialogs and work; Armed toggles; the panel stays live while its loop runs at about 30 Hz.
 - Closing the panel (#94): with the panel closed and Armed, the slot's generator running across 01:00:00:00 Entered Intro and sent its Action; running the plugin again reopened the panel on the same run with that log. Quit disarmed and stopped it, with the panel left open saying so. A changed run token (as after a re-import or a show load) stopped the loop and closed its panel.
 - Commands (#98), sent with `Plugin <n> "..."`: `arm` started TrigIT without its panel, Armed; `open` showed it; `fire intro` fired Intro; `toggle` disarmed; `stop` stopped the current Song; `quit` stopped TrigIT; unknown commands and Songs changed nothing.
+- Compact panel (#95): Compact and Full switch; the rest of onPC stayed usable with the compact panel open; dragged, it came back at the same place after Full and Compact; `screen 2` was refused on a one-screen onPC and `screen 1` stored.
 - Start macro (#99): the first `start` made Macro "TrigIT start"; after the loop was stopped as a show load would, running the macro started TrigIT again, disarmed, without its panel; running it again changed nothing; no second macro was made.
 - Bridge mode to 127.0.0.1: ArtTimeCode packets arrive with the slot's timecode and rate type, about 20 a second (steps: 1 frame 80%, 2 frames 20%, rarely 2–4 back), and stop 0.5 s after the input does. Not yet with the Mac app itself.
 - Armed, with Art-Net Timecode from 00:59:58:00 on slot 1 at 30 fps: the panel shows the Playhead, Enters Intro at 01:00:00:00 and sends `/composition/columns/1/connect 1` once. When timecode stops it shows Timecode lost, then logs the Stop after the Stop time. Fire Song sends while disarmed.
