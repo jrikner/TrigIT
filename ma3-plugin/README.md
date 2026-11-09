@@ -51,6 +51,7 @@ OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose 
 - `src/trigit_plan.lua`: `fromCSV(text, options)` and `fromTrigit(text, options)` turn a Set into a plan. Pure Lua, no MA calls.
 - `src/ma3.lua`: turns a plan into the cues the plugin writes. Pure Lua.
 - `src/commands.lua`: every MA3 command the plugin writes, formatted in one place.
+- `src/engine.lua` and `src/timecode.lua`: TrigIT's Show Engine ported from `Sources/TrigITEngine/ShowEngine.swift` for the full plugin (#47). Pure Lua, not used by the importer yet. `spec/engine_spec.lua` ports the Swift engine tests one for one.
 - `src/json.lua`: a small JSON decoder for `.trigit` files.
 - `adapter/TrigIT.lua`: the MA3 side: dialogs, OSC lines, the Sequence and the Timecode. The only file that calls MA.
 - `build.lua`: bundles all of these into `dist/` (an MA3 plugin can't `require` files). Run `lua build.lua` after changing them, and commit `dist/`. CI fails if it is out of date.
