@@ -35,8 +35,11 @@ Run the plugin (tap it, or type `Plugin <n>`). It opens the TrigIT panel:
 - **Mode:** Standalone or Bridge, and for Bridge the Mac's IP address (or a broadcast address).
 - **Fire Song**, **Stop Song:** send a Song's Start or Stop Actions by hand, even while disarmed. Stop Song stops the current Song.
 - **Import Show:** write the Set as a Timecode Show (below), with the panel's slot and frame rate as defaults.
+- **Quit:** stop TrigIT. It disarms, stops following timecode and sends nothing until you run the plugin again. The panel stays, saying TrigIT stopped: close it with its ✖.
 
-The panel sends OSC on the In & Out line named `TrigIT <Destination>` (an import makes it), or else the first line with the Destination's IP and port. Close the panel with its ✖: nothing is sent while it is closed.
+The panel sends OSC on the In & Out line named `TrigIT <Destination>` (an import makes it), or else the first line with the Destination's IP and port. Closing the panel with its ✖ only hides it: TrigIT keeps following timecode and, while Armed, keeps sending. Run the plugin again to reopen the panel on the same Set, Armed state and log. Use **Quit** to stop it.
+
+Only one TrigIT runs at a time. Running the plugin while TrigIT runs opens its panel; it never starts a second one. Loading another show, or importing the plugin again, stops the running TrigIT and disarms it. Quit TrigIT before you delete or re-import the plugin: deleting a plugin from Lua crashed onPC 2.5.1 in testing.
 
 Use the panel or an imported Timecode Show for a Set, not both: both fire the same Actions.
 
@@ -69,7 +72,8 @@ OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose 
 
 ## What was checked on onPC 2.5.1
 
-- The panel: Load Set, Timecode, Fire Song and Import Show open their dialogs and work; Armed toggles; the panel stays live while its loop runs at about 30 Hz, and closing it ends the loop.
+- The panel: Load Set, Timecode, Fire Song and Import Show open their dialogs and work; Armed toggles; the panel stays live while its loop runs at about 30 Hz.
+- Closing the panel (#94): with the panel closed and Armed, the slot's generator running across 01:00:00:00 Entered Intro and sent its Action; running the plugin again reopened the panel on the same run with that log. Quit disarmed and stopped it, with the panel left open saying so. A changed run token (as after a re-import or a show load) stopped the loop and closed its panel.
 - Bridge mode to 127.0.0.1: ArtTimeCode packets arrive with the slot's timecode and rate type, about 20 a second (steps: 1 frame 80%, 2 frames 20%, rarely 2–4 back), and stop 0.5 s after the input does. Not yet with the Mac app itself.
 - Armed, with Art-Net Timecode from 00:59:58:00 on slot 1 at 30 fps: the panel shows the Playhead, Enters Intro at 01:00:00:00 and sends `/composition/columns/1/connect 1` once. When timecode stops it shows Timecode lost, then logs the Stop after the Stop time. Fire Song sends while disarmed.
 

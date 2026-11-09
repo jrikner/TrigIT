@@ -567,6 +567,16 @@ function actions.stop()
     if song and state.show then state.show:fireStop(song.id, Time()) end
 end
 
+function actions.quit()
+    local reply = MessageBox({
+        title = "TrigIT: quit",
+        message = "Stop TrigIT? It disarms, stops following timecode and sends nothing until you run the plugin again.\n\n"
+            .. "To keep TrigIT running, close the panel with its ✖ instead.",
+        commands = { { value = 1, name = "Quit TrigIT" }, { value = 0, name = "Cancel" } },
+    })
+    if reply.result == 1 then state.quit = true end
+end
+
 function actions.import()
     if not state.file then actions.load() end
     if not state.file then return end
@@ -635,9 +645,9 @@ local function build(overlay)
     ui.log = text(lists, "1,0")
 
     local buttons = frame:Append("UILayoutGrid")
-    buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 6, 1
+    buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 7, 1
     for i, entry in ipairs({ { "Load Set", "Load" }, { "Timecode", "Settings" }, { "Mode", "Mode" }, { "Fire Song", "Fire" },
-        { "Stop Song", "Stop" }, { "Import Show", "Import" } }) do
+        { "Stop Song", "Stop" }, { "Import Show", "Import" }, { "Quit", "Quit" } }) do
         button(buttons, (i - 1) .. ",0", entry[1], entry[2])
     end
     ui.base = base
@@ -693,10 +703,29 @@ local function render(ui, now)
     put(ui.log, "Text", table.concat(log, "\n"))
 end
 
-local function main()
-    local overlay = GetDisplayByIndex(1).ScreenOverlay
-    if overlay:FindRecursive(PANEL) then return end -- already open; its loop keeps running
+-- The panel only shows TrigIT: closing it leaves the loop below running
+-- (#94), and running the plugin again opens a new panel on the same state.
+local function closePanel()
+    local panel = GetDisplayByIndex(1).ScreenOverlay:FindRecursive(PANEL)
+    if panel then panel:Parent():Remove(panel:Index()) end
+end
 
+local function openPanel()
+    local overlay = GetDisplayByIndex(1).ScreenOverlay
+    if not overlay:FindRecursive(PANEL) then state.ui = build(overlay) end
+end
+
+-- One TrigIT at a time: each start writes a new run token to the show's
+-- global variables, and a loop whose token is gone ends. That covers a
+-- re-imported plugin (a second copy of this file) and a newly loaded show.
+local RUN = "Run"
+
+local function main()
+    if state.token and setting(RUN) == state.token then return openPanel() end
+
+    -- A stopped TrigIT's panel is reused; one left by another copy of the
+    -- plugin (re-imported) is closed.
+    if not (state.ui and IsObjectValid(state.ui.base)) then closePanel() end
     local tc = previous()
     state.slot = tonumber(setting("Slot")) or (tc and tonumber(tostring(tc.TCSlot))) or 1
     state.rate = setting("Rate") or (tc and tostring(tc:Get("Note")):match("Frame rate: (.+)$")) or "30"
@@ -704,15 +733,19 @@ local function main()
     local path, name = setting("SetPath"), setting("SetName")
     if path and name then load({ path = path, name = name }, true) end
 
-    local ui = build(overlay)
-    for _, action in ipairs({ "Load", "Settings", "Mode", "Fire", "Stop", "Import" }) do
+    local token = ("%.6f-%d"):format(Time(), math.random(1, 1e9))
+    state.token, state.quit = token, false
+    remember(RUN, token)
+    for _, action in ipairs({ "Load", "Settings", "Mode", "Fire", "Stop", "Import", "Quit" }) do
         signalTable["TrigIT" .. action] = function() state.pending = action:lower() end
     end
     signalTable.TrigITArm = function()
         if state.show and state.mode ~= "Bridge" then state.show:setArmed(not state.show.engine.isArmed) end
     end
+    openPanel()
+    Printf("TrigIT is running. Closing its panel leaves it running; run the plugin again to reopen it, Quit to stop it.")
 
-    while IsObjectValid(ui.base) do
+    while state.token == token and not state.quit do
         local now = Time()
         local action = state.pending
         state.pending = nil
@@ -743,10 +776,27 @@ local function main()
         if now - (state.checked or 0) > 1 then
             checkTwice()
             state.checked = now
+            if setting(RUN) ~= token then state.token = nil end -- another TrigIT started, or another show was loaded
         end
-        render(ui, now)
+        if state.ui and IsObjectValid(state.ui.base) then render(state.ui, now) end
         coroutine.yield(0)
     end
+
+    if state.token and state.token ~= token then return end -- a newer run in this same state took over
+    if state.show then state.show:setArmed(false) end
+    state.token, state.show = nil, nil
+    -- The panel stays: removing it from here right after its Quit dialog
+    -- crashed onPC 2.5.1. It says TrigIT stopped and closes with its ✖.
+    local ui = state.ui
+    if ui and IsObjectValid(ui.base) then
+        put(ui.playhead, "Text", "--:--:--:--")
+        put(ui.song, "Text", "Stopped")
+        put(ui.arm, "Text", "Stopped")
+        put(ui.arm, "BackColor", "Button.Background")
+        put(ui.status, "Text", "TrigIT stopped: nothing is sent. Close this panel, or run the plugin to start again.")
+        put(ui.status, "TextColor", "Global.Text")
+    end
+    Printf("TrigIT stopped: nothing is sent until you run the plugin again.")
 end
 
 return main
