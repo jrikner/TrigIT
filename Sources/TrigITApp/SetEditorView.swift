@@ -116,7 +116,7 @@ struct SetEditorView: View {
     private func importCSV() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.commaSeparatedText, .tabSeparatedText, .plainText]
-        panel.message = "Choose a CSV file with the columns name, start, end (hh:mm:ss:ff)."
+        panel.message = "Choose a CSV file with the columns name, start, end (hh:mm:ss:ff), and optionally destination, kind, address, args, when."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let text = (try? String(contentsOf: url, encoding: .utf8))
                 ?? (try? String(contentsOf: url, encoding: .isoLatin1)) else {

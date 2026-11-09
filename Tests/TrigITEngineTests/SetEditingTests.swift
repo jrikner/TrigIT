@@ -2,6 +2,7 @@
 
 import XCTest
 import TrigITEngine
+import TrigITProtocols
 
 final class OverlapTests: XCTestCase {
     let intro = Song(id: SongID(rawValue: 1), name: "Intro", start: tc("01:00:00:00"), end: tc("01:04:00:00"))
@@ -98,11 +99,19 @@ final class CSVImportTests: XCTestCase {
         XCTAssertEqual(quotes.songs.map(\.name), ["The \"Big\" One"])
     }
 
-    func testIgnoresBlankLinesAndExtraColumns() {
+    func testIgnoresBlankLinesAndEmptyActionColumns() {
         var set = ShowSet()
-        let report = set.importSongs(csv: "\nIntro,01:00:00:00,01:04:00:00,,\n\n  \nOutro,02:00:00:00,02:01:00:00,notes\n")
+        let report = set.importSongs(csv: "\nIntro,01:00:00:00,01:04:00:00,,\n\n  \nOutro,02:00:00:00,02:01:00:00,,,,,\n")
         XCTAssertEqual(report.problems, [])
         XCTAssertEqual(set.songs.count, 2)
+        XCTAssertEqual(set.destinations, [])
+    }
+
+    func testAFourthColumnIsADestinationSoANotesColumnLosesOnlyItsAction() {
+        var set = ShowSet()
+        let report = set.importSongs(csv: "Outro,02:00:00:00,02:01:00:00,notes\n")
+        XCTAssertEqual(set.songs.map(\.name), ["Outro"])
+        XCTAssertEqual(report.problems, [.init(line: 1, reason: .invalidKind(""))])
     }
 
     func testReportsInvalidRowsByLineAndImportsTheRest() {
@@ -151,6 +160,129 @@ final class CSVImportTests: XCTestCase {
     func testEmptyTextImportsNothing() {
         var set = ShowSet()
         XCTAssertEqual(set.importSongs(csv: ""), SongImportReport())
+    }
+
+    // MARK: Action columns (the MA3 plugin's extended CSV, ma3-plugin/README.md)
+
+    /// The example in ma3-plugin/README.md.
+    func testImportsTheMA3PluginsExampleWithItsActionsAndDestinations() throws {
+        var set = ShowSet()
+        let report = set.importSongs(csv: #"""
+            name,start,end,destination,kind,address,args,when
+            Intro,01:00:00:00,01:04:00:00,Resolume,osc,/composition/columns/1/connect,1
+            ,,,Resolume,osc,/composition/layers/2/clear,"""fade out"" 0.5"
+            ,,,Ableton,midi-note,10/36,100,stop
+            DJ Pull-up,02:00:00:00,02:01:30:00,Resolume,osc,/composition/columns/2/connect,1
+            """#)
+        XCTAssertEqual(report.problems, [])
+        XCTAssertEqual(set.destinations.map(\.name), ["Resolume", "Ableton"])
+        XCTAssertEqual(set.destinations.map(\.transports), [[.osc], [.midi]])
+        let (resolume, ableton) = (set.destinations[0].id, set.destinations[1].id)
+
+        XCTAssertEqual(set.songs.map(\.name), ["Intro", "DJ Pull-up"])
+        let intro = set.songs[0]
+        XCTAssertEqual(intro.startActions.map(\.destinationID), [resolume, resolume])
+        XCTAssertEqual(intro.startActions.map(\.message), [
+            .osc(OSCMessage(address: "/composition/columns/1/connect", arguments: [.int(1)])),
+            .osc(OSCMessage(address: "/composition/layers/2/clear", arguments: [.string("fade out"), .float(0.5)])),
+        ])
+        XCTAssertEqual(intro.stopActions.map(\.destinationID), [ableton])
+        XCTAssertEqual(intro.stopActions.map(\.message), [.midiNote(MIDINote(channel: 9, note: 36, velocity: 100))])
+        XCTAssertEqual(set.songs[1].startActions.map(\.message), [
+            .osc(OSCMessage(address: "/composition/columns/2/connect", arguments: [.int(1)])),
+        ])
+        XCTAssertEqual(report.imported, set.songs)
+    }
+
+    func testReadsEachActionKindWithItsDefaults() {
+        var set = ShowSet()
+        let report = set.importSongs(csv: """
+            Song,01:00:00:00,01:04:00:00,Rig,OSC,/go,,START
+            ,,,Rig,midi-note,60,,stop
+            ,,,Rig,dmx,2.101
+            ,,,Rig,dmx,0.512,0,stop
+            """)
+        XCTAssertEqual(report.problems, [])
+        XCTAssertEqual(set.destinations.map(\.transports), [[.osc, .midi, .dmx]])
+        XCTAssertEqual(set.destinations.first?.dmxOutput, .artNet)
+        XCTAssertEqual(set.songs.first?.startActions.map(\.message), [
+            .osc(OSCMessage(address: "/go")),
+            .dmxPulse(DMXPulse(universe: 2, channel: 101, value: 255, duration: 0.5)),
+        ])
+        XCTAssertEqual(set.songs.first?.stopActions.map(\.message), [
+            .midiNote(MIDINote(channel: 0, note: 60, velocity: 127)),
+            .dmxPulse(DMXPulse(universe: 0, channel: 512, value: 0)),
+        ])
+    }
+
+    func testReusesADestinationByNameAndSwitchesOnTheTransportItNeeds() {
+        let resolume = Destination(name: "Resolume", host: "10.0.0.5", port: 7000)
+        var set = ShowSet(destinations: [resolume])
+        set.importSongs(csv: """
+            Intro,01:00:00:00,01:04:00:00,Resolume,osc,/a
+            ,,,Resolume,midi-note,1/60
+            """)
+        XCTAssertEqual(set.destinations.count, 1)
+        XCTAssertEqual(set.destinations[0].host, "10.0.0.5")
+        XCTAssertEqual(set.destinations[0].transports, [.osc, .midi])
+        XCTAssertEqual(set.songs.first?.startActions.map(\.destinationID), [resolume.id, resolume.id])
+    }
+
+    /// The same problems, worded the same, as the MA3 plugin reports.
+    func testReportsBadActionRowsByLineAndKeepsTheSong() {
+        var set = ShowSet()
+        let report = set.importSongs(csv: #"""
+            ,,,Resolume,osc,/orphan
+            Song,01:00:00:00,01:04:00:00,,osc,/a
+            ,,,Rig,fog,/a
+            ,,,Rig,osc,no-slash
+            ,,,Rig,osc,/a,"""unterminated"
+            ,,,Rig,midi-note,17/60
+            ,,,Rig,midi-note,128
+            ,,,Rig,midi-note,60,0
+            ,,,Rig,dmx,101
+            ,,,Rig,dmx,1.513
+            ,,,Rig,dmx,1.1,256
+            ,,,Rig,osc,/a,,later
+            ,,,Rig,osc,/kept
+            Broken,1:00,02:00:00:00
+            ,,,Rig,osc,/lost
+            """#)
+        XCTAssertEqual(report.problems.map(\.line), Array(1...13).filter { $0 != 13 } + [14, 15])
+        XCTAssertEqual(report.problems.map(\.reason.description), [
+            "no Song above to add the Action to",
+            "the Action has no destination",
+            "kind \"fog\" is not osc, midi-note or dmx",
+            "\"no-slash\" is not an OSC address",
+            "arguments \"\"unterminated\" have an unterminated quote",
+            "note \"17/60\" is not a note (60, or channel/note as 10/36)",
+            "note \"128\" is not a note (60, or channel/note as 10/36)",
+            "velocity \"0\" is not 1-127",
+            "\"101\" is not universe.channel (channel 1-512)",
+            "\"1.513\" is not universe.channel (channel 1-512)",
+            "value \"256\" is not 0-255",
+            "when \"later\" is not start or stop",
+            "start \"1:00\" is not a timecode (hh:mm:ss:ff)",
+            "the Song above was skipped",
+        ])
+        XCTAssertEqual(set.songs.map(\.name), ["Song"])
+        XCTAssertEqual(set.songs[0].startActions.map(\.message), [.osc(OSCMessage(address: "/kept"))])
+        XCTAssertEqual(set.destinations.map(\.name), ["Rig"])
+    }
+
+    func testAnOverlappingSongDropsItsActionsAndAddsNoDestination() {
+        var set = ShowSet(songs: [Song(name: "Existing", start: tc("01:00:00:00"), end: tc("01:10:00:00"))])
+        let report = set.importSongs(csv: """
+            Clash,01:05:00:00,01:20:00:00,Resolume,osc,/a
+            ,,,Resolume,osc,bad
+            ,,,Ableton,midi-note,60
+            """)
+        XCTAssertEqual(report.problems, [
+            .init(line: 1, reason: .overlaps("Existing")),
+            .init(line: 2, reason: .invalidOSCAddress("bad")),
+        ])
+        XCTAssertEqual(set.songs.map(\.name), ["Existing"])
+        XCTAssertEqual(set.destinations, [])
     }
 }
 
