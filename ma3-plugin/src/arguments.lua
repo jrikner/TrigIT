@@ -5,7 +5,7 @@
 
 local M = {}
 
-M.USAGE = 'TrigIT accepts: "open", "start", "arm", "disarm", "toggle", "fire <Song>", "stop", "quit"'
+M.USAGE = 'TrigIT accepts: "open", "start", "arm", "disarm", "toggle", "fire <Song>", "stop", "screen <n>", "quit"'
 
 local PLAIN = { open = true, start = true, arm = true, disarm = true, toggle = true, stop = true, quit = true }
 
@@ -18,6 +18,11 @@ function M.parse(text)
         local song = rest:match('^"(.*)"$') or rest
         if song == "" then return nil, 'fire needs a Song name, as in "fire Intro"' end
         return { verb = "fire", song = song }
+    end
+    if verb == "screen" then
+        local n = tonumber(rest:match("^%d+$"))
+        if not n or n < 1 then return nil, 'screen needs a screen number, as in "screen 2"' end
+        return { verb = "screen", screen = n }
     end
     if PLAIN[verb] and rest == "" then return { verb = verb } end
     return nil, ('"%s" is not a TrigIT command. %s'):format(text, M.USAGE)
