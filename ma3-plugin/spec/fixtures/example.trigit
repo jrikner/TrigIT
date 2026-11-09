@@ -1,0 +1,63 @@
+{
+  "format" : "TrigIT Set",
+  "set" : {
+    "destinations" : [
+      {
+        "dmxHost" : "2.255.255.255",
+        "dmxInterface" : null,
+        "dmxRefreshRate" : 30,
+        "dmxSourceName" : "TrigIT",
+        "host" : "127.0.0.1",
+        "id" : "100",
+        "name" : "Resolume",
+        "port" : 7000,
+        "sacnPriority" : 100,
+        "usesDMX" : false,
+        "usesMIDI" : false,
+        "usesOSC" : true
+      }
+    ],
+    "id" : "1",
+    "name" : "Example Set",
+    "songs" : [
+      {
+        "end" : "01:04:00:00",
+        "id" : "10",
+        "name" : "Intro",
+        "start" : "01:00:00:00",
+        "startActions" : [
+          {
+            "destination" : "100",
+            "id" : "1001",
+            "osc" : {
+              "address" : "/composition/columns/1/connect",
+              "arguments" : [
+                {
+                  "int" : 1
+                }
+              ]
+            },
+            "type" : "osc"
+          }
+        ],
+        "stopActions" : [
+
+        ]
+      },
+      {
+        "end" : "02:01:30:00",
+        "id" : "11",
+        "name" : "DJ Pull-up",
+        "start" : "02:00:00:00",
+        "startActions" : [
+
+        ],
+        "stopActions" : [
+
+        ]
+      }
+    ],
+    "stopTime" : 2
+  },
+  "version" : 1
+}

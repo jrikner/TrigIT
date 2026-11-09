@@ -1020,19 +1020,5 @@ final class ShowModel: ObservableObject {
     }
 
     /// The Set created on first launch, to try things with straight away.
-    static let exampleSet: ShowSet = {
-        let resolume = Destination(name: "Resolume", host: "127.0.0.1", port: 7000)
-        return ShowSet(
-            name: "Example Set",
-            songs: [
-                Song(name: "Intro", start: Timecode("01:00:00:00")!, end: Timecode("01:04:00:00")!, startActions: [
-                    Action(destinationID: resolume.id, message: .osc(OSCMessage(
-                        address: "/composition/columns/1/connect", arguments: [.int(1)]
-                    ))),
-                ]),
-                Song(name: "DJ Pull-up", start: Timecode("02:00:00:00")!, end: Timecode("02:01:30:00")!),
-            ],
-            destinations: [resolume]
-        )
-    }()
+    static let exampleSet = ShowSet.example
 }
