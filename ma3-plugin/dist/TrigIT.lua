@@ -1173,6 +1173,36 @@ return artnet
 
 end
 
+modules["arguments"] = function()
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- The text after `Plugin <n>` (#98), as in `Plugin TrigIT "fire Intro"`.
+-- parse(text) returns { verb = ..., song = ... }, or nil and what it accepts.
+-- Pure Lua, no MA calls.
+
+local M = {}
+
+M.USAGE = 'TrigIT accepts: "open", "arm", "disarm", "toggle", "fire <Song>", "stop", "quit"'
+
+local PLAIN = { open = true, arm = true, disarm = true, toggle = true, stop = true, quit = true }
+
+function M.parse(text)
+    text = (text or ""):match("^%s*(.-)%s*$")
+    if text == "" then return { verb = "open" } end
+    local verb, rest = text:match("^(%S+)%s*(.*)$")
+    verb = verb:lower()
+    if verb == "fire" then
+        local song = rest:match('^"(.*)"$') or rest
+        if song == "" then return nil, 'fire needs a Song name, as in "fire Intro"' end
+        return { verb = "fire", song = song }
+    end
+    if PLAIN[verb] and rest == "" then return { verb = verb } end
+    return nil, ('"%s" is not a TrigIT command. %s'):format(text, M.USAGE)
+end
+
+return M
+
+end
+
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- The grandMA3 side of the plugin, everything that touches MA. Running it
 -- opens the TrigIT panel, which follows a timecode slot in one of two modes
@@ -1198,6 +1228,7 @@ local ma3 = require("ma3")
 local live = require("live")
 local timecode = require("timecode")
 local artnet = require("artnet")
+local arguments = require("arguments")
 
 local MARK = "Made by the TrigIT plugin. Importing a Set again replaces it."
 local RATES = { "24", "25", "29.97 DF", "30" }
@@ -1895,8 +1926,42 @@ end
 -- re-imported plugin (a second copy of this file) and a newly loaded show.
 local RUN = "Run"
 
-local function main()
-    if state.token and setting(RUN) == state.token then return openPanel() end
+-- Commands from a macro, an executor or the command line (#98), such as
+-- Plugin TrigIT "arm". They act on the running TrigIT.
+local function command(request)
+    local verb = request.verb
+    if verb == "open" then return openPanel() end
+    if verb == "quit" then
+        state.quit = true
+        return Printf("TrigIT: stopping")
+    end
+    if verb == "stop" or verb == "fire" then
+        if onMac() then return ErrPrintf("TrigIT: in bridge mode the Mac app fires") end
+        if not state.show then return ErrPrintf("TrigIT: no Set loaded") end
+        if verb == "stop" then
+            local current = state.show.engine.currentSong
+            if not current then return Printf("TrigIT: no current Song to stop") end
+            return state.show:fireStop(current, Time())
+        end
+        for _, song in ipairs(state.set.songs) do
+            if song.name:lower() == request.song:lower() then return state.show:fire(song.id, Time()) end
+        end
+        return ErrPrintf(('TrigIT: no Song named "%s" in %s'):format(request.song, state.file.name))
+    end
+    if state.mode == "Bridge" then return ErrPrintf("TrigIT: in bridge mode, arm on the Mac") end
+    if not state.show then return ErrPrintf("TrigIT: no Set loaded, so nothing to arm") end
+    local armed = state.show.engine.isArmed
+    local want = verb == "arm" or (verb == "toggle" and not armed)
+    if want ~= armed then state.show:setArmed(want) end
+    Printf("TrigIT: " .. (want and "Armed" or "Disarmed"))
+end
+
+local function main(_, text)
+    local request, why = arguments.parse(text)
+    if not request then return ErrPrintf("TrigIT: " .. why) end
+    local running = state.token and setting(RUN) == state.token
+    if running then return command(request) end
+    if request.verb == "quit" then return Printf("TrigIT is not running") end
 
     -- A stopped TrigIT's panel is reused; one left by another copy of the
     -- plugin (re-imported) is closed.
@@ -1917,8 +1982,8 @@ local function main()
     signalTable.TrigITArm = function()
         if state.show and state.mode ~= "Bridge" then state.show:setArmed(not state.show.engine.isArmed) end
     end
-    openPanel()
     Printf("TrigIT is running. Closing its panel leaves it running; run the plugin again to reopen it, Quit to stop it.")
+    command(request) -- opens the panel when asked to, or with no argument
 
     while state.token == token and not state.quit do
         local now = Time()
