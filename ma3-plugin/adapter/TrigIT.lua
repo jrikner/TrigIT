@@ -24,6 +24,7 @@ local live = require("live")
 local timecode = require("timecode")
 local artnet = require("artnet")
 local arguments = require("arguments")
+local view = require("view")
 
 local MARK = "Made by the TrigIT plugin. Importing a Set again replaces it."
 local RATES = { "24", "25", "29.97 DF", "30" }
@@ -485,6 +486,7 @@ function actions.load()
     if file then load(file) end
 end
 
+-- One dialog for how TrigIT follows timecode and who fires (#97).
 function actions.settings()
     local slots, rates = {}, {}
     for n = 1, #Root().TimecodeSlots:Children() do slots["Slot " .. n] = n end
@@ -492,48 +494,43 @@ function actions.settings()
     local preset = 4
     for i, rate in ipairs(RATES) do if rate == state.rate then preset = i end end
     local reply = MessageBox({
-        title = "TrigIT: timecode",
-        message = "The slot the show's timecode arrives on, and its frame rate. Changing them disarms the panel.",
+        title = "TrigIT: settings",
+        message = "Timecode slot: where the show's timecode arrives.\n"
+            .. "Frame rate: the incoming timecode's. MA reads it but doesn't pass it on to plugins, "
+            .. "and TrigIT needs it to place each Song's end to the frame.\n\n"
+            .. "Standalone: this console sends the Set's Actions while Armed.\n"
+            .. "Bridge: this console sends the slot to the TrigIT Mac app as Art-Net Timecode, and the Mac app fires. "
+            .. "Choose Art-Net Timecode as its Timecode Source, and enter that computer's IP address "
+            .. "(or a broadcast address such as 192.168.1.255).\n\n"
+            .. "Changing any of these disarms TrigIT.",
         commands = { { value = 1, name = "OK" }, { value = 0, name = "Cancel" } },
+        inputs = { { name = "Bridge computer IP", value = state.bridgeTo or "", whiteFilter = "0123456789." } },
         selectors = {
             { name = "Timecode slot", type = 0, values = slots, selectedValue = state.slot },
             { name = "Frame rate", type = 1, values = rates, selectedValue = preset },
+            { name = "Mode", type = 1, values = { Standalone = 1, Bridge = 2 }, selectedValue = state.mode == "Bridge" and 2 or 1 },
         },
     })
     if reply.result ~= 1 then return end
-    state.slot, state.rate = reply.selectors["Timecode slot"], RATES[reply.selectors["Frame rate"]]
-    remember("Slot", state.slot)
-    remember("Rate", state.rate)
-    follow()
+    local mode, ip = reply.selectors.Mode == 2 and "Bridge" or "Standalone", reply.inputs["Bridge computer IP"]
+    if mode == "Bridge" and not ip:match("^%d+%.%d+%.%d+%.%d+$") then
+        say("address needed", "Bridge mode needs the bridge computer's IP address, such as 192.168.1.20.")
+        return
+    end
+    local slot, rate = reply.selectors["Timecode slot"], RATES[reply.selectors["Frame rate"]]
+    if slot == state.slot and rate == state.rate and mode == state.mode and ip == (state.bridgeTo or "") then return end
+    state.slot, state.rate, state.mode, state.bridgeTo = slot, rate, mode, ip
+    remember("Slot", slot)
+    remember("Rate", rate)
+    remember("Mode", mode)
+    remember("BridgeTo", ip)
+    follow() -- a new show, disarmed
 end
 
 local function onMac()
     if state.mode ~= "Bridge" then return false end
     if state.show then state.show:note("In bridge mode the Mac app fires: use its Show screen", true) end
     return true
-end
-
-function actions.mode()
-    local reply = MessageBox({
-        title = "TrigIT: mode",
-        message = "Standalone: this console sends the Set's Actions while Armed.\n"
-            .. "Bridge: this console sends the timecode slot to the TrigIT Mac app as Art-Net Timecode, and the Mac app fires. "
-            .. "Choose Art-Net Timecode as its Timecode Source.\n\n"
-            .. "For bridge mode, enter the Mac's IP address, or a broadcast address such as 192.168.1.255.",
-        commands = { { value = 1, name = "OK" }, { value = 0, name = "Cancel" } },
-        inputs = { { name = "Mac IP address", value = state.bridgeTo or "", whiteFilter = "0123456789." } },
-        selectors = { { name = "Mode", type = 1, values = { Standalone = 1, Bridge = 2 }, selectedValue = state.mode == "Bridge" and 2 or 1 } },
-    })
-    if reply.result ~= 1 then return end
-    local mode, ip = reply.selectors.Mode == 2 and "Bridge" or "Standalone", reply.inputs["Mac IP address"]
-    if mode == "Bridge" and not ip:match("^%d+%.%d+%.%d+%.%d+$") then
-        say("address needed", "Bridge mode needs the Mac's IP address, such as 192.168.1.20.")
-        return
-    end
-    state.mode, state.bridgeTo = mode, ip
-    remember("Mode", mode)
-    remember("BridgeTo", ip)
-    if state.show then state.show:setArmed(false) end
 end
 
 -- Bridge mode: each new frame on the slot goes to the Mac once.
@@ -555,10 +552,17 @@ local function bridge(seconds)
     if ok then state.frames = (state.frames or 0) + 1 end
 end
 
-function actions.fire()
-    if onMac() then return end
-    local song = chooseSong("Song to fire")
-    if song and state.show then state.show:fire(song.id, Time()) end
+-- A tapped Song row: send its Start or Stop Actions now, even disarmed.
+function actions.song(row)
+    local song = state.ui and state.ui.songRows[row] and state.ui.songRows[row].song
+    if not song or onMac() or not state.show then return end
+    local reply = MessageBox({
+        title = "TrigIT: " .. song.name,
+        message = "Send this Song's Start or Stop Actions now, even while disarmed?",
+        commands = { { value = 1, name = "Fire Start" }, { value = 2, name = "Fire Stop" }, { value = 0, name = "Cancel" } },
+    })
+    if reply.result == 1 then state.show:fire(song.id, Time()) end
+    if reply.result == 2 then state.show:fireStop(song.id, Time()) end
 end
 
 function actions.stop()
@@ -611,8 +615,13 @@ local function rows(grid, sizes)
     end
 end
 
+local SONG_ROWS, LOG_ROWS = 10, 8 -- ponytail: fixed rows, built once; long Sets scroll to the current Song
+local GREEN, ORANGE = "Global.SuccessText", "Global.WarningText"
+
+-- Built once and only ever changed in place: removing panel parts right
+-- after a tap crashed onPC 2.5.1 (#94).
 local function build(overlay)
-    local ui = {}
+    local ui = { songRows = {}, logRows = {} }
     local base = overlay:Append("BaseInput")
     base.Name = PANEL
     base.AutoClose, base.CloseOnEscape = "No", "Yes"
@@ -624,31 +633,59 @@ local function build(overlay)
     name.Text, name.Anchors = "TrigIT", "0,0"
     title:Append("CloseButton").Anchors = "1,0"
 
+    -- Full: Playhead, current and next Song, Armed; an alert banner; Songs
+    -- (tap to fire) and recent fires; the buttons.
     local frame = base:Append("DialogFrame")
     frame.Anchors = { left = 0, right = 0, top = 1, bottom = 1 }
-    rows(frame, { 110, 50, "*", 80 })
+    rows(frame, { 140, 46, "*", 80 })
 
     local top = frame:Append("UILayoutGrid")
     top.Anchors, top.Columns, top.Rows = "0,0", 3, 1
+    top[2][1].SizePolicy, top[2][1].Size = "Fixed", "360"
+    top[2][3].SizePolicy, top[2][3].Size = "Fixed", "300"
     ui.playhead = text(top, "0,0", "console32", "Center")
-    ui.song = text(top, "1,0", "Regular32", "Center")
-    ui.playhead.TextalignmentV, ui.song.TextalignmentV = "Center", "Center"
+    ui.playhead.TextalignmentV = "Center"
+    local now = top:Append("UILayoutGrid")
+    now.Anchors = "1,0"
+    rows(now, { 60, 40, 40 })
+    ui.song = text(now, "0,0", "Regular32", "Center")
+    ui.song.TextalignmentV = "Bottom"
+    ui.progress = text(now, "0,1", "Regular20", "Center")
+    ui.next = text(now, "0,2", "Regular20", "Center")
     ui.arm = button(top, "2,0", "", "Arm")
-    ui.arm.Font = "Regular28"
+    ui.arm.Font = "Regular32"
 
     ui.status = text(frame, "0,1", "Regular20", "Center")
     ui.status.TextalignmentV = "Center"
 
     local lists = frame:Append("UILayoutGrid")
     lists.Anchors, lists.Columns, lists.Rows = "0,2", 2, 1
-    lists[2][1].SizePolicy, lists[2][1].Size = "Fixed", "540"
-    ui.songs = text(lists, "0,0")
-    ui.log = text(lists, "1,0")
+    lists[2][1].SizePolicy, lists[2][1].Size = "Fixed", "560"
+    local songs = lists:Append("UILayoutGrid")
+    songs.Anchors = "0,0"
+    local sizes = { 36 }
+    for _ = 1, SONG_ROWS do sizes[#sizes + 1] = 40 end
+    sizes[#sizes + 1] = "*"
+    rows(songs, sizes)
+    ui.songsTitle = text(songs, "0,0", "Medium20", "Left")
+    for i = 1, SONG_ROWS do
+        local row = button(songs, "0," .. i, "", "Song" .. i)
+        row.Font, row.TextalignmentH = "Regular20", "Left"
+        ui.songRows[i] = { button = row }
+    end
+    local log = lists:Append("UILayoutGrid")
+    log.Anchors = "1,0"
+    sizes = { 36 }
+    for _ = 1, LOG_ROWS do sizes[#sizes + 1] = 36 end
+    sizes[#sizes + 1] = "*"
+    rows(log, sizes)
+    text(log, "0,0", "Medium20", "Left").Text = " Recent fires"
+    for i = 1, LOG_ROWS do ui.logRows[i] = text(log, "0," .. i, "Regular18", "Left") end
 
     local buttons = frame:Append("UILayoutGrid")
-    buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 8, 1
-    for i, entry in ipairs({ { "Load Set", "Load" }, { "Timecode", "Settings" }, { "Mode", "Mode" }, { "Fire Song", "Fire" },
-        { "Stop Song", "Stop" }, { "Import Show", "Import" }, { "Compact", "Size" }, { "Quit", "Quit" } }) do
+    buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 6, 1
+    for i, entry in ipairs({ { "Load Set", "Load" }, { "Settings", "Settings" }, { "Stop Song", "Stop" },
+        { "Import Show", "Import" }, { "Compact", "Size" }, { "Quit", "Quit" } }) do
         button(buttons, (i - 1) .. ",0", entry[1], entry[2])
     end
 
@@ -673,7 +710,7 @@ end
 
 -- The panel's two sizes, each where it was last dragged to (MA sets X and Y,
 -- aligned Left and Top, when the title bar is dragged), else centred.
-local SIZES = { Full = { 1300, 720 }, Compact = { 760, 190 } }
+local SIZES = { Full = { 1300, 800 }, Compact = { 760, 190 } }
 
 local function number(value) return tonumber(tostring(value)) end
 
@@ -722,15 +759,14 @@ local ALERTS = {
 local function render(ui, now)
     local show = state.show
     local engine = show and show.engine
-    local current = engine and engine.currentSong
-    local armed = engine and engine.isArmed
+    local model = view.model(state.set, show, state.rate)
+    local armed = model.armed
 
-    put(ui.playhead, "Text", engine and engine.playhead or "--:--:--:--")
-    local currentName
-    for _, song in ipairs(state.set and state.set.songs or {}) do
-        if song.id == current then currentName = song.name end
-    end
-    put(ui.song, "Text", currentName or "No Song")
+    put(ui.playhead, "Text", model.playhead or "--:--:--:--")
+    put(ui.playhead, "TextColor", (model.playhead and not engine.isStopped) and "Global.Text" or "Global.LabelText")
+    put(ui.song, "Text", model.song or "No Song")
+    put(ui.progress, "Text", model.progress or "")
+    put(ui.next, "Text", model.next or "")
     put(ui.arm, "Text", state.mode == "Bridge" and "BRIDGE" or armed and "ARMED" or "Disarmed")
     put(ui.arm, "BackColor", armed and RED or "Button.Background")
     for _, field in ipairs({ "playhead", "song", "arm" }) do put(ui.compact[field], "Text", ui[field].Text) end
@@ -744,23 +780,31 @@ local function render(ui, now)
     local alert = engine and ALERTS[engine.alert or ""]
     local warning = alert or (state.mode == "Bridge" and state.bridgeProblem) or (armed and state.twice)
         or (state.notice ~= "" and state.notice)
-    put(ui.status, "Text", warning or status)
-    put(ui.status, "TextColor", warning and RED or "Global.Text")
-    put(ui.compact.status, "Text", warning or status)
-    put(ui.compact.status, "TextColor", warning and RED or "Global.Text")
-
-    local songs = { " SONGS" }
-    for _, song in ipairs(state.set and state.set.songs or {}) do
-        local span = song.start and (song.start .. " - " .. song["end"]) or "notes only"
-        songs[#songs + 1] = ("%s %s   %s"):format(song.id == current and ">" or " ", song.name, span)
+    for _, line in ipairs({ ui.status, ui.compact.status }) do
+        put(line, "Text", warning or status)
+        put(line, "TextColor", warning and "Global.Text" or "Global.LabelText")
+        put(line, "BackColor", warning and RED or "UIObject.Background")
     end
-    put(ui.songs, "Text", table.concat(songs, "\n"))
 
-    local log = { " LAST ACTIONS" }
-    for _, entry in ipairs(show and show.log or {}) do
-        log[#log + 1] = ("%s %-11s  %s"):format(entry.failed and "!" or " ", entry.time, entry.text)
+    -- Songs: a window of SONG_ROWS rows that keeps the current Song in view.
+    local current = 1
+    for i, row in ipairs(model.songs) do if row.current then current = i end end
+    local offset = math.max(0, math.min(current - 3, #model.songs - SONG_ROWS))
+    put(ui.songsTitle, "Text", (" Songs (%d)   tap one to fire it"):format(#model.songs))
+    for i = 1, SONG_ROWS do
+        local row, slot = model.songs[offset + i], ui.songRows[i]
+        slot.song = row
+        put(slot.button, "Text", row and ("%s  %s     %s%s"):format(row.current and ">" or " ", row.name, row.span,
+            row.fired and not row.current and "   (fired)" or "") or "")
+        put(slot.button, "TextColor", row and (row.current and GREEN or row.fired and "Global.LabelText") or "Global.Text")
+        put(slot.button, "Visible", row and "Yes" or "No")
     end
-    put(ui.log, "Text", table.concat(log, "\n"))
+
+    for i = 1, LOG_ROWS do
+        local entry = model.log[i]
+        put(ui.logRows[i], "Text", entry and (" %s   %s"):format(entry.time ~= "" and entry.time or "           ", entry.text) or "")
+        put(ui.logRows[i], "TextColor", entry and entry.failed and RED or "Global.Text")
+    end
 end
 
 -- The panel only shows TrigIT: closing it leaves the loop below running
@@ -877,9 +921,10 @@ local function main(_, text)
     state.token, state.quit = token, false
     remember(RUN, token)
     state.compact = setting("Compact") == "Yes"
-    for _, action in ipairs({ "Load", "Settings", "Mode", "Fire", "Stop", "Import", "Size", "Quit" }) do
+    for _, action in ipairs({ "Load", "Settings", "Stop", "Import", "Size", "Quit" }) do
         signalTable["TrigIT" .. action] = function() state.pending = action:lower() end
     end
+    for i = 1, SONG_ROWS do signalTable["TrigITSong" .. i] = function() state.pending = "song" .. i end end
     signalTable.TrigITArm = function()
         if state.show and state.mode ~= "Bridge" then state.show:setArmed(not state.show.engine.isArmed) end
     end
@@ -893,7 +938,8 @@ local function main(_, text)
         local action = state.pending
         state.pending = nil
         if action then
-            local ok, problem = pcall(actions[action])
+            local name, row = action:match("^(%a+)(%d*)$")
+            local ok, problem = pcall(actions[name], tonumber(row))
             if not ok then ErrPrintf("TrigIT: " .. tostring(problem)) end
         end
         local show = state.show
