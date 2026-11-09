@@ -43,6 +43,20 @@ Only one TrigIT runs at a time. Running the plugin while TrigIT runs opens its p
 
 Use the panel or an imported Timecode Show for a Set, not both: both fire the same Actions.
 
+## Commands
+
+Put these in a macro, on an executor or on the command line, with the plugin's number or name:
+
+| Command | Does |
+|---|---|
+| `Plugin TrigIT` or `Plugin TrigIT "open"` | Open the panel |
+| `Plugin TrigIT "arm"`, `"disarm"`, `"toggle"` | Arm or disarm |
+| `Plugin TrigIT "fire Intro"` | Send that Song's Start Actions, even while disarmed. The name isn't case-sensitive. |
+| `Plugin TrigIT "stop"` | Send the current Song's Stop Actions |
+| `Plugin TrigIT "quit"` | Stop TrigIT, as the Quit button does |
+
+They act on the running TrigIT. If it isn't running, any command but `quit` starts it first, with the Set, slot and mode it remembers, and only `open` (or no command) opens the panel. Each command says what it did in the System Monitor. In bridge mode the Mac app arms and fires, so `arm`, `fire` and `stop` say so and do nothing.
+
 ## Bridge mode
 
 ![The panel in bridge mode](docs/panel-bridge.png)
@@ -74,6 +88,7 @@ OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose 
 
 - The panel: Load Set, Timecode, Fire Song and Import Show open their dialogs and work; Armed toggles; the panel stays live while its loop runs at about 30 Hz.
 - Closing the panel (#94): with the panel closed and Armed, the slot's generator running across 01:00:00:00 Entered Intro and sent its Action; running the plugin again reopened the panel on the same run with that log. Quit disarmed and stopped it, with the panel left open saying so. A changed run token (as after a re-import or a show load) stopped the loop and closed its panel.
+- Commands (#98), sent with `Plugin <n> "..."`: `arm` started TrigIT without its panel, Armed; `open` showed it; `fire intro` fired Intro; `toggle` disarmed; `stop` stopped the current Song; `quit` stopped TrigIT; unknown commands and Songs changed nothing.
 - Bridge mode to 127.0.0.1: ArtTimeCode packets arrive with the slot's timecode and rate type, about 20 a second (steps: 1 frame 80%, 2 frames 20%, rarely 2–4 back), and stop 0.5 s after the input does. Not yet with the Mac app itself.
 - Armed, with Art-Net Timecode from 00:59:58:00 on slot 1 at 30 fps: the panel shows the Playhead, Enters Intro at 01:00:00:00 and sends `/composition/columns/1/connect 1` once. When timecode stops it shows Timecode lost, then logs the Stop after the Stop time. Fire Song sends while disarmed.
 
@@ -101,6 +116,7 @@ The panel runs the Mac app's Show Engine, with the same rules. It follows one sl
 - `src/live.lua`: the engine on the console: slot seconds in, MA commands and the panel's log out. Pure Lua.
 - `src/artnet.lua`: ArtTimeCode packets for bridge mode. Pure Lua.
 - `src/json.lua`: a small JSON decoder for `.trigit` files.
+- `src/arguments.lua`: reads the commands above. Pure Lua.
 - `adapter/TrigIT.lua`: the MA3 side: the panel and its loop, dialogs, OSC lines, the Sequence and the Timecode. The only file that calls MA.
 - `docs/`: screenshots of the panel on onPC.
 - `build.lua`: bundles all of these into `dist/` (an MA3 plugin can't `require` files). Run `lua build.lua` after changing them, and commit `dist/`. CI fails if it is out of date.
