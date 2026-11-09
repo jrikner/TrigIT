@@ -108,7 +108,9 @@ A file that can't be opened is never overwritten: TrigIT says why and starts an 
 
 ### Importing Songs from CSV
 
-One Song per row: name, start, end, with times as `hh:mm:ss:ff`. Commas, semicolons or tabs all work, as do an optional header row and quoted names. Rows that are invalid, or would overlap another Song, are listed by line number and skipped; the rest are added. Use **Import CSV…** in Songs to add to the current Set, or on the Welcome screen to make a new Set.
+One Song per row: name, start, end, with times as `hh:mm:ss:ff`. Commas, semicolons or tabs all work, as do an optional header row and quoted names. Rows that are invalid, or would overlap another Song, are listed by line number and skipped; the rest are added.
+
+A row can also carry an Action in five more columns: destination, kind (`osc`, `midi-note` or `dmx`), address, args or value, and when (`start` or `stop`). A row with an empty name, start and end adds another Action to the Song above. Destinations are matched by name, or added. A bad Action row loses only that Action. The format is the same as the grandMA3 plugin's, described in [ma3-plugin/README.md](ma3-plugin/README.md#csv-format). Use **Import CSV…** in Songs to add to the current Set, or on the Welcome screen to make a new Set.
 
 ```csv
 name,start,end

@@ -120,7 +120,7 @@ extension ShowModel {
         guard !isShowLocked else { return }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.commaSeparatedText, .tabSeparatedText, .plainText]
-        panel.message = "Choose a CSV file with the columns name, start, end (hh:mm:ss:ff)."
+        panel.message = "Choose a CSV file with the columns name, start, end (hh:mm:ss:ff), and optionally destination, kind, address, args, when."
         guard panel.runModal() == .OK, let csv = panel.url,
               let text = (try? String(contentsOf: csv, encoding: .utf8)) ?? (try? String(contentsOf: csv, encoding: .isoLatin1))
         else { return }

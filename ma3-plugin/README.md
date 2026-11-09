@@ -126,7 +126,7 @@ This extends the CSV the Mac app imports (Set > Import Songs from CSV). One row 
 - Quote a field to use the separator in it, and double a quote inside quotes (`"Intro, ""live"""`). Fields are trimmed.
 - An optional header: a first row whose start and end are both not timecodes is skipped.
 - Empty lines are skipped. Problems are reported with 1-based line numbers. Bad Song rows are skipped. A bad Action row loses only that Action.
-- Columns 1–3 alone are exactly what the Mac app imports.
+- The Mac app imports the same format with the same rules and problem messages (Import CSV…). Its Destinations are found by name or added, with the transports their Actions need.
 
 ```csv
 name,start,end,destination,kind,address,args,when
@@ -136,4 +136,4 @@ Intro,01:00:00:00,01:04:00:00,Resolume,osc,/composition/columns/1/connect,1
 DJ Pull-up,02:00:00:00,02:01:30:00,Resolume,osc,/composition/columns/2/connect,1
 ```
 
-The Mac app's importer reads columns 1–3 only. It reports a row with an empty name as "the name is empty", so it doesn't read the extra Action rows yet (#87).
+The Mac app's importer reads the same columns with the same rules (`ShowSet.importSongs(csv:)` in `Sources/TrigITEngine/SetEditing.swift`). Change both together.
