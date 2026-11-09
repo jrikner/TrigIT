@@ -11,6 +11,16 @@ env:
   SWIFT_VERSION: 6.4.2
 
 jobs:
+  # Every commit in a PR carries Signed-off-by (CONTRIBUTING.md).
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: scripts/check-dco.sh ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
+
   # The platform-free core: protocols, engine, storage (with the libltc fixtures).
   linux:
     runs-on: ubuntu-latest
