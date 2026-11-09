@@ -214,6 +214,29 @@ local function nextFrame(timecode, rate)
     return ("%02d:%02d:%02d:%02d"):format(h, m, s, f)
 end
 
+-- The MA command for one Action to its Destination ({ name, uses }), and its
+-- release (a later Note Off) if any; or nil and why it can't be sent.
+local function commandFor(action, destination)
+    local transport = TRANSPORT[action.type]
+    if not destination then
+        return nil, "an Action sends to a Destination that isn't in the Set; left out"
+    elseif not destination.uses[transport] then
+        return nil, ('Destination "%s" has %s switched off; Action left out'):format(destination.name, TRANSPORT_NAME[transport])
+    elseif UNSUPPORTED[action.type] then
+        return nil, UNSUPPORTED[action.type] .. " Actions aren't supported by the MA3 plugin yet; left out"
+    end
+    return commands[action.type](action[action.type])
+end
+
+-- A Destination as the plan uses it, from one in a .trigit file.
+local function destinationFrom(d)
+    -- Older files: OSC on, MIDI and DMX on if their output is set (Coding.swift).
+    local uses = { osc = d.usesOSC ~= false, midi = d.usesMIDI, dmx = d.usesDMX }
+    if uses.midi == nil then uses.midi = d.midiOutput ~= nil end
+    if uses.dmx == nil then uses.dmx = d.dmxOutput ~= nil end
+    return { name = d.name or "", uses = uses, host = d.host or "", port = d.port or 0, midiPort = d.midiOutput and d.midiOutput.name }
+end
+
 -- Builds the plan from Songs, each { name, where, hasSpan, start, ["end"],
 -- startNote, stopNote, startActions, stopActions }, whose Actions carry their
 -- resolved Destination (or nil if missing). Same rules for both inputs.
@@ -248,17 +271,7 @@ local function build(songs, destinations, frameRate, warnings)
                 local time = phase == "start" and song.start or nextFrame(song["end"], frameRate)
                 for _, action in ipairs(song[phase .. "Actions"]) do
                     local destination, transport = action.destination, TRANSPORT[action.type]
-                    local command, release
-                    if not destination then
-                        command, release = nil, "an Action sends to a Destination that isn't in the Set; left out"
-                    elseif not destination.uses[transport] then
-                        command, release = nil, ('Destination "%s" has %s switched off; Action left out')
-                            :format(destination.name, TRANSPORT_NAME[transport])
-                    elseif UNSUPPORTED[action.type] then
-                        command, release = nil, UNSUPPORTED[action.type] .. " Actions aren't supported by the MA3 plugin yet; left out"
-                    else
-                        command, release = commands[action.type](action[action.type])
-                    end
+                    local command, release = commandFor(action, destination)
                     if command then
                         local key = transport == "osc" and "osc_line_for" or transport .. "_for"
                         events[#events + 1] = {
@@ -301,10 +314,9 @@ end
 
 -- MARK: .trigit
 
--- Reads a Set file written by SetFile.swift. Returns the plan, or nil and the
--- reason the file can't be read (worded as the Mac app words it).
-function plan.fromTrigit(text, options)
-    local frameRate = checkRate(options)
+-- The "set" of a .trigit file (SetFile.swift), as the Show Engine takes it;
+-- or nil and the reason the file can't be read, worded as the Mac app words it.
+function plan.readSet(text)
     local ok, file = pcall(json.decode, text)
     if not ok then return nil, "The file is not a TrigIT Set (it isn't JSON)." end
     if type(file) ~= "table" or file.format ~= "TrigIT Set" or math.type(file.version) ~= "integer" then
@@ -314,24 +326,31 @@ function plan.fromTrigit(text, options)
         return nil, ("The Set was saved by a newer TrigIT (file version %d); update TrigIT to open it."):format(file.version)
     end
     if type(file.set) ~= "table" then return nil, 'The Set file is damaged: it has no "set".' end
+    return file.set
+end
 
-    local built
-    ok, built = pcall(function()
+-- The command for one Action the Show Engine sends, to its Destination as
+-- the .trigit file has it: as commandFor, OSC with commands.OSC_LINE still in.
+function plan.liveCommand(action, destination)
+    return commandFor(action, destinationFrom(destination))
+end
+
+-- Reads a Set file written by SetFile.swift. Returns the plan, or nil and the
+-- reason the file can't be read (worded as the Mac app words it).
+function plan.fromTrigit(text, options)
+    local frameRate = checkRate(options)
+    local set, reason = plan.readSet(text)
+    if not set then return nil, reason end
+
+    local ok, built = pcall(function()
         local byID, destinations = {}, {}
-        for _, d in ipairs(file.set.destinations or {}) do
-            -- Older files: OSC on, MIDI and DMX on if their output is set (Coding.swift).
-            local uses = { osc = d.usesOSC ~= false, midi = d.usesMIDI, dmx = d.usesDMX }
-            if uses.midi == nil then uses.midi = d.midiOutput ~= nil end
-            if uses.dmx == nil then uses.dmx = d.dmxOutput ~= nil end
-            local destination = {
-                name = d.name or "", uses = uses, host = d.host or "", port = d.port or 0,
-                midiPort = d.midiOutput and d.midiOutput.name,
-            }
+        for _, d in ipairs(set.destinations or {}) do
+            local destination = destinationFrom(d)
             byID[d.id] = destination
             destinations[#destinations + 1] = destination
         end
         local songs = {}
-        for _, s in ipairs(file.set.songs or {}) do
+        for _, s in ipairs(set.songs or {}) do
             local song = {
                 name = s.name or "", where = ('Song "%s"'):format(s.name or ""), hasSpan = s.start ~= nil,
                 startNote = s.startNote, stopNote = s.stopNote, startActions = {}, stopActions = {},
@@ -646,13 +665,503 @@ return ma3
 
 end
 
+modules["timecode"] = function()
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- The grandMA3 side of the plugin: pick a Set file, choose where things go,
--- and write a Timecode Show that fires the Set's Actions. Everything that
--- touches MA lives here; the rules are in trigit_plan.lua and ma3.lua.
+-- Timecode as "hh:mm:ss:ff" strings, two digits a field, so they compare as
+-- strings in time order. Frame counting as Sources/TrigITProtocols/TimecodeFields.swift.
+
+local timecode = {}
+
+-- Frames counted per timecode second, and per second of real time.
+timecode.RATES = {
+    ["24"] = { nominal = 24, real = 24 },
+    ["25"] = { nominal = 25, real = 25 },
+    ["29.97 DF"] = { nominal = 30, real = 30000 / 1001, dropFrame = true },
+    ["30"] = { nominal = 30, real = 30 },
+}
+
+local function fields(text)
+    local h, m, s, f = text:match("^(%d+):(%d+):(%d+):(%d+)$")
+    return tonumber(h), tonumber(m), tonumber(s), tonumber(f)
+end
+
+-- Frames since 00:00:00:00. Drop-frame skips frame numbers 0 and 1 at the
+-- start of every minute except each tenth.
+function timecode.index(text, rate)
+    local h, m, s, f = fields(text)
+    local info = timecode.RATES[rate]
+    local nominal = ((h * 60 + m) * 60 + s) * info.nominal + f
+    if not info.dropFrame then return nominal end
+    local minutes = h * 60 + m
+    return nominal - 2 * (minutes - minutes // 10)
+end
+
+-- The timecode `index` frames after 00:00:00:00, wrapping at 24 hours.
+function timecode.fromIndex(index, rate)
+    local info = timecode.RATES[rate]
+    local fps = info.nominal
+    local day = info.dropFrame and 24 * 6 * 17982 or 24 * 3600 * fps
+    local n = index % day
+    if info.dropFrame then
+        local blocks, remainder = n // 17982, n % 17982
+        n = n + 18 * blocks + (remainder < 2 and 0 or 2 * ((remainder - 2) // 1798))
+    end
+    return ("%02d:%02d:%02d:%02d"):format(n // (3600 * fps), (n // (60 * fps)) % 60, (n // fps) % 60, n % fps)
+end
+
+-- The frame showing `seconds` after 00:00:00:00, as the Timecode Show's
+-- timeline and a timecode slot count (ma3.seconds is the inverse).
+function timecode.fromSeconds(seconds, rate)
+    return timecode.fromIndex(math.floor(seconds * timecode.RATES[rate].real + 1e-6), rate)
+end
+
+return timecode
+
+end
+
+modules["engine"] = function()
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- TrigIT's Show Engine in Lua: a line-for-line port of
+-- Sources/TrigITEngine/ShowEngine.swift, with the same rules (GLOSSARY.md).
+-- It follows timecode readings and decides when Songs fire and End. Pure: no
+-- MA calls, no clock; time comes in through reading timestamps and tick().
 --
--- What it writes, all marked with MARK in their Note so a re-import finds
--- and replaces them:
+-- The Set is the "set" of a decoded .trigit file: songs (id, name, start, end,
+-- startNote, stopNote, startActions, stopActions; no start means no span),
+-- destinations (with id) and stopTime. Timecodes are "hh:mm:ss:ff" strings.
+--
+-- Every call returns a list of events, in order, each a table with `kind`:
+--   playheadMoved {timecode}            frameRateChanged {frameRate}
+--   jumped {from, to}                   currentSongChanged {song} (nil: none)
+--   fired {song, cause}                 cause: "entering" | "note" | "manual"
+--   ended {song, cause}                 cause: "playedPastEnd" | "note" | "manual"
+--   stopped                             dropout {seconds}
+--   send {song, action, destination, reason}
+--                                       reason: "entering" | "ending" | "manualFire" | "manualStop"
+--   missingDestination {song, action}   armedChanged {armed}
+--   sourceHealthChanged {role, healthy} liveSourceChanged {role}  role: "primary" | "backup"
+--   alertChanged {alert}                alert: "primaryLostRunningOnBackup" | "allTimecodeLost" | nil
+
+local timecode = require("timecode")
+
+local engine = {}
+
+-- How far, in frames, the Playhead may land from where natural playback
+-- would have put it before the move counts as a Jump.
+engine.JUMP_TOLERANCE_FRAMES = 5
+-- A gap longer than this (but shorter than the Stop time) is a Dropout.
+engine.DROPOUT_THRESHOLD = 0.2
+-- A Timecode Source with no reading for longer than this is lost.
+engine.SOURCE_LOSS_TIME = 0.25
+engine.DEFAULT_STOP_TIME = 2
+local STOP_TIME_MIN, STOP_TIME_MAX = 0.5, 30
+local ROLES = { "primary", "backup" }
+
+local Engine = {}
+Engine.__index = Engine
+
+local function append(list, more)
+    for _, item in ipairs(more) do list[#list + 1] = item end
+    return list
+end
+
+-- A Set ready for the engine: Songs keep their order, Destinations by id, the
+-- Stop time within its range.
+local function prepare(set)
+    local destinations = {}
+    for _, destination in ipairs(set.destinations or {}) do destinations[destination.id] = destination end
+    local stopTime = set.stopTime or engine.DEFAULT_STOP_TIME
+    return {
+        songs = set.songs or {},
+        destinations = destinations,
+        stopTime = math.min(math.max(stopTime, STOP_TIME_MIN), STOP_TIME_MAX),
+    }
+end
+
+-- `set` as described above; `armed` false unless given.
+function engine.new(set, armed)
+    return setmetatable({
+        set = prepare(set or {}),
+        isArmed = armed == true,
+        isStopped = false,
+        liveSource = "primary",
+        playhead = nil, frameRate = nil, alert = nil,
+        currentSong = nil, -- the Song most recently Entered, by timecode or note
+        timecodeSong = nil, -- the Song whose span contains the Playhead
+        stoppedAt = nil, -- where timecode was at a Stop, until the next reading
+        lastReading = nil, -- the last reading followed, from the live source
+        lastReadings = {}, -- the last reading from each source
+        healthy = {},
+        resumedAt = nil, -- when timecode last started arriving after silence or a Stop
+    }, Engine)
+end
+
+function Engine:song(id)
+    for _, song in ipairs(self.set.songs) do
+        if song.id == id then return song end
+    end
+end
+
+-- The Song whose span contains `position`; the first in list order if a
+-- hand-made Set overlaps.
+function Engine:songAt(position)
+    for _, song in ipairs(self.set.songs) do
+        if song.start and song.start <= position and position <= song["end"] then return song end
+    end
+end
+
+function Engine:setArmed(armed)
+    if armed == self.isArmed then return {} end
+    self.isArmed = armed
+    return { { kind = "armedChanged", armed = armed } }
+end
+
+-- Replaces the Set. Nothing fires here; the next reading applies it.
+function Engine:updateSet(set)
+    self.set = prepare(set)
+end
+
+-- The sends for one of a Song's Action lists, in list order. Automatic sends
+-- are suppressed while disarmed.
+function Engine:sends(songID, list, reason, evenIfDisarmed)
+    local song = self:song(songID)
+    if not (self.isArmed or evenIfDisarmed) or not song then return {} end
+    local events = {}
+    for _, action in ipairs(song[list] or {}) do
+        local destination = self.set.destinations[action.destination]
+        if destination then
+            events[#events + 1] = { kind = "send", song = songID, action = action, destination = destination, reason = reason }
+        else
+            events[#events + 1] = { kind = "missingDestination", song = songID, action = action.id }
+        end
+    end
+    return events
+end
+
+function Engine:enter(songID, cause)
+    local events = {}
+    if songID ~= self.currentSong then events[1] = { kind = "currentSongChanged", song = songID } end
+    self.currentSong = songID
+    events[#events + 1] = { kind = "fired", song = songID, cause = cause }
+    return append(events, self:sends(songID, "startActions", "entering"))
+end
+
+function Engine:finish(songID, cause)
+    return append({ { kind = "ended", song = songID, cause = cause } }, self:sends(songID, "stopActions", "ending"))
+end
+
+-- A Jump is any landing far from where natural playback from the previous
+-- reading would be by now.
+function Engine:isJump(previous, reading)
+    local rate = reading.frameRate
+    local elapsed = math.max(0, reading.timestamp - previous.timestamp)
+    local expected = timecode.index(previous.timecode, rate) + elapsed * timecode.RATES[rate].real
+    return math.abs(timecode.index(reading.timecode, rate) - expected) > engine.JUMP_TOLERANCE_FRAMES
+end
+
+function Engine:follow(reading)
+    local events = {}
+    if reading.frameRate ~= self.frameRate then
+        self.frameRate = reading.frameRate
+        events[#events + 1] = { kind = "frameRateChanged", frameRate = reading.frameRate }
+    end
+
+    local jumped = false
+    local restarted = self.stoppedAt ~= nil
+    -- Resuming after a Stop somewhere other than where it stopped is a
+    -- relocation: like a Jump, it Ends nothing.
+    local relocated = restarted and math.abs(timecode.index(self.stoppedAt, reading.frameRate)
+        - timecode.index(reading.timecode, reading.frameRate)) > engine.JUMP_TOLERANCE_FRAMES
+    self.stoppedAt = nil
+    local previous = self.lastReading
+    if previous then
+        local gap = reading.timestamp - previous.timestamp
+        if gap > engine.DROPOUT_THRESHOLD then events[#events + 1] = { kind = "dropout", seconds = gap } end
+        if self:isJump(previous, reading) then
+            jumped = true
+            events[#events + 1] = { kind = "jumped", from = previous.timecode, to = reading.timecode }
+        end
+    end
+    self.isStopped = false
+
+    if reading.timecode ~= self.playhead then
+        self.playhead = reading.timecode
+        events[#events + 1] = { kind = "playheadMoved", timecode = reading.timecode }
+    end
+    self.lastReading = reading
+
+    local song = self:songAt(reading.timecode)
+    local songID = song and song.id
+    if songID == self.timecodeSong and not (restarted and songID ~= nil) then return events end
+    local left = self.timecodeSong
+    self.timecodeSong = songID
+    -- Only leaving the current Song matters; one a note displaced is gone already.
+    local leftCurrent = left ~= nil and left == self.currentSong
+
+    -- Playing on past its end time Ends a Song, before the next Song fires.
+    -- A Jump out of a Song, or playing backwards out of it, does not.
+    local leftSong = leftCurrent and self:song(left)
+    if leftSong and not jumped and not relocated and reading.timecode > leftSong["end"] then
+        append(events, self:finish(left, "playedPastEnd"))
+    end
+
+    -- Entering: arriving inside a Song from outside it, by playing or a Jump.
+    if songID ~= nil then
+        if songID == self.currentSong and not restarted then return events end
+        append(events, self:enter(songID, "entering"))
+    elseif leftCurrent then
+        self.currentSong = nil
+        events[#events + 1] = { kind = "currentSongChanged", song = nil }
+    end
+    return events
+end
+
+function Engine:isHealthy(role, time)
+    local reading = self.lastReadings[role]
+    return reading ~= nil and time - reading.timestamp <= engine.SOURCE_LOSS_TIME
+end
+
+function Engine:isLost(role, time)
+    if not self.resumedAt or time - self.resumedAt <= engine.SOURCE_LOSS_TIME then return false end
+    return not self:isHealthy(role, time)
+end
+
+-- Reports sources going healthy or lost, and the alert that follows.
+function Engine:updateHealth(time)
+    local events = {}
+    for _, role in ipairs(ROLES) do
+        local healthy = self:isHealthy(role, time)
+        if healthy ~= (self.healthy[role] == true) then
+            self.healthy[role] = healthy or nil
+            events[#events + 1] = { kind = "sourceHealthChanged", role = role, healthy = healthy }
+        end
+    end
+    local alert
+    if not next(self.healthy) then
+        -- Silence after a Stop, or before any timecode, is normal.
+        alert = not (self.isStopped or self.resumedAt == nil) and "allTimecodeLost" or nil
+    elseif self.liveSource == "backup" and not self.healthy.primary then
+        alert = "primaryLostRunningOnBackup"
+    end
+    if alert ~= self.alert then
+        self.alert = alert
+        events[#events + 1] = { kind = "alertChanged", alert = alert }
+    end
+    return events
+end
+
+-- Feeds one reading { timecode, frameRate, timestamp } from the "primary"
+-- (default) or "backup" source. Only the live source moves the Playhead; if
+-- it is lost while this one is healthy, this one takes over seamlessly.
+function Engine:handle(reading, role)
+    role = role or "primary"
+    local events = {}
+    local previous = self.lastReadings[role]
+    self.lastReadings[role] = reading
+    if self.resumedAt == nil then self.resumedAt = reading.timestamp end
+    if role ~= self.liveSource then
+        if not self:isLost(self.liveSource, reading.timestamp) then
+            return append(events, self:updateHealth(reading.timestamp))
+        end
+        self.liveSource = role
+        events[#events + 1] = { kind = "liveSourceChanged", role = role }
+        -- Follow on from this source's own last reading if it was running.
+        if previous and reading.timestamp - previous.timestamp <= engine.SOURCE_LOSS_TIME then
+            self.lastReading = previous
+        end
+    end
+    append(events, self:follow(reading))
+    return append(events, self:updateHealth(reading.timestamp))
+end
+
+-- A Note On (channel 0-15). Stop Notes first: a Song with only a Stop Note
+-- sends its Stop Actions every time; otherwise it Ends the Song if current.
+-- Then Start Notes Enter their Songs unless already current. Velocity 0 is a
+-- Note Off and is ignored.
+function Engine:handleNoteOn(channel, note, velocity)
+    if (velocity or 0) <= 0 then return {} end
+    local function matches(trigger) return trigger and trigger.channel == channel and trigger.note == note end
+    local events = {}
+    for _, song in ipairs(self.set.songs) do
+        if matches(song.stopNote) then
+            if not song.start and not song.startNote then
+                append(events, self:finish(song.id, "note"))
+            elseif song.id == self.currentSong then
+                append(events, self:finish(song.id, "note"))
+                self.currentSong = nil
+                events[#events + 1] = { kind = "currentSongChanged", song = nil }
+            end
+        end
+    end
+    for _, song in ipairs(self.set.songs) do
+        if matches(song.startNote) and song.id ~= self.currentSong then append(events, self:enter(song.id, "note")) end
+    end
+    return events
+end
+
+-- Lets time pass with no reading. Silence longer than the Set's Stop time is
+-- a Stop: no Stop Actions, the current Song stays current but is re-armed.
+function Engine:tick(time)
+    local last = self.lastReading
+    if self.isStopped or not last or time - last.timestamp <= self.set.stopTime then
+        return self:updateHealth(time)
+    end
+    self.isStopped = true
+    self.lastReading, self.resumedAt, self.stoppedAt = nil, nil, last.timecode
+    local events = { { kind = "stopped" } }
+    if self.liveSource ~= "primary" then
+        self.liveSource = "primary"
+        events[#events + 1] = { kind = "liveSourceChanged", role = "primary" }
+    end
+    return append(events, self:updateHealth(time))
+end
+
+-- Fires a Song's Start Actions by hand, even while disarmed. The current Song
+-- is not changed.
+function Engine:fire(songID)
+    if not self:song(songID) then return {} end
+    return append({ { kind = "fired", song = songID, cause = "manual" } },
+        self:sends(songID, "startActions", "manualFire", true))
+end
+
+-- Sends a Song's Stop Actions by hand, even while disarmed.
+function Engine:fireStop(songID)
+    if not self:song(songID) then return {} end
+    return append({ { kind = "ended", song = songID, cause = "manual" } },
+        self:sends(songID, "stopActions", "manualStop", true))
+end
+
+return engine
+
+end
+
+modules["live"] = function()
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- The Show Engine on the console: feeds it a timecode slot's time, turns the
+-- Actions it sends into MA commands, and keeps the short log the panel shows.
+-- Pure: the adapter reads the slot, runs the commands and passes the clock.
+
+local engine = require("engine")
+local timecode = require("timecode")
+local plan = require("trigit_plan")
+local commands = require("commands")
+
+local live = {}
+live.LOG_LENGTH = 8
+
+local Live = {}
+Live.__index = Live
+
+-- `set` as engine.new takes it; `rate` one of timecode.RATES; `lineFor(destination)`
+-- the In & Out OSC line number for a Set Destination, or nil if it has none.
+function live.new(set, rate, lineFor, armed)
+    local names = {}
+    for _, song in ipairs(set.songs or {}) do names[song.id] = song.name end
+    return setmetatable({
+        engine = engine.new(set, armed), rate = rate, lineFor = lineFor, names = names,
+        log = {}, outbox = {}, later = {},
+    }, Live)
+end
+
+local function describe(action)
+    local body = action[action.type] or {}
+    if action.type == "osc" then return "OSC " .. tostring(body.address) end
+    if action.type == "midiNote" then return ("note %s/%s"):format(tostring((body.channel or 0) + 1), tostring(body.note)) end
+    if action.type == "msc" then return "MSC" end
+    return "DMX pulse"
+end
+
+function Live:note(text, failed)
+    table.insert(self.log, 1, { time = self.engine.playhead or "", text = text, failed = failed })
+    self.log[live.LOG_LENGTH + 1] = nil
+end
+
+function Live:send(event, now)
+    local song, destination = self.names[event.song] or "?", event.destination
+    local command, release = plan.liveCommand(event.action, destination)
+    if command and event.action.type == "osc" then
+        local line = self.lineFor(destination)
+        if line then
+            command = command:gsub(commands.OSC_LINE:gsub("%p", "%%%0"), tostring(line))
+        else
+            command, release = nil, ('no OSC line for "%s": import the Set, or name a line "TrigIT %s"')
+                :format(destination.name, destination.name)
+        end
+    end
+    local what = ("%s: %s to %s"):format(song, describe(event.action), destination.name)
+    if not command then return self:note(what .. " not sent: " .. release, true) end
+    self.outbox[#self.outbox + 1] = command
+    if type(release) == "table" then self.later[#self.later + 1] = { at = now + release.after, command = release.command } end
+    self:note(what)
+end
+
+function Live:apply(events, now)
+    for _, event in ipairs(events) do
+        local kind, name = event.kind, self.names[event.song]
+        if kind == "send" then
+            self:send(event, now)
+        elseif kind == "missingDestination" then
+            self:note((name or "?") .. ": an Action's Destination isn't in the Set; not sent", true)
+        elseif kind == "fired" then
+            self:note(name .. (event.cause == "manual" and " fired by hand" or " entered")
+                .. ((self.engine.isArmed or event.cause == "manual") and "" or " (disarmed: nothing sent)"))
+        elseif kind == "ended" then
+            self:note(name .. (event.cause == "manual" and " stopped by hand" or " ended"))
+        elseif kind == "jumped" then
+            self:note("Jump to " .. event.to)
+        elseif kind == "stopped" then
+            self:note("Timecode stopped")
+        elseif kind == "dropout" then
+            self:note(("Dropout of %.1f s"):format(event.seconds), true)
+        end
+    end
+end
+
+-- A reading of the slot: `seconds` of timecode at clock time `now`. Only a
+-- new frame is a reading, so a slot that has stopped moving goes quiet and
+-- tick() finds the Stop.
+function Live:follow(seconds, now)
+    local position = timecode.fromSeconds(seconds, self.rate)
+    if position == self.position then return end
+    self.position = position
+    self:apply(self.engine:handle({ timecode = position, frameRate = self.rate, timestamp = now }), now)
+end
+
+function Live:tick(now)
+    self:apply(self.engine:tick(now), now)
+    for i = #self.later, 1, -1 do
+        if self.later[i].at <= now then
+            self.outbox[#self.outbox + 1] = table.remove(self.later, i).command
+        end
+    end
+end
+
+function Live:setArmed(armed) self:apply(self.engine:setArmed(armed), 0) end
+function Live:fire(id, now) self:apply(self.engine:fire(id), now) end
+function Live:fireStop(id, now) self:apply(self.engine:fireStop(id), now) end
+
+-- The commands to run now, in order; each is returned once.
+function Live:take()
+    local out = self.outbox
+    self.outbox = {}
+    return out
+end
+
+return live
+
+end
+
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- The grandMA3 side of the plugin, everything that touches MA. Running it
+-- opens the TrigIT panel: it loads a Set, follows a timecode slot with the
+-- Show Engine (live.lua) and sends the Actions while Armed, and can import the
+-- Set as a Timecode Show that fires the Actions without the plugin running.
+-- The rules are in src/.
+
+local pluginName, componentName, signalTable, myHandle = ...
+
+-- What an import writes, all marked with MARK in their Note so a re-import
+-- finds and replaces them:
 --   Sequence <n>  one cue per moment; each cue's Command sends that moment's
 --                 Actions (SendOSC / SendMIDI).
 --   Timecode <n>  one track playing that sequence, with a Goto event per cue
@@ -661,6 +1170,7 @@ end
 
 local trigitPlan = require("trigit_plan")
 local ma3 = require("ma3")
+local live = require("live")
 
 local MARK = "Made by the TrigIT plugin. Importing a Set again replaces it."
 local RATES = { "24", "25", "29.97 DF", "30" }
@@ -750,13 +1260,13 @@ local function previous()
     end
 end
 
-local function chooseOptions(setName, eventCount)
+local function chooseOptions(setName, eventCount, follow)
     local tc, seq = previous()
     local defaults = {
         timecode = tc and tc.no or firstFree(DataPool().Timecodes, 1),
         sequence = seq and seq.no or firstFree(DataPool().Sequences, 101),
-        slot = tc and tonumber(tostring(tc.TCSlot)) or 1,
-        rate = tc and tostring(tc:Get("Note")):match("Frame rate: (.+)$") or "30",
+        slot = follow.slot,
+        rate = follow.rate,
     }
     local slots = {}
     for n = 1, 16 do slots["Slot " .. n] = n end
@@ -979,14 +1489,8 @@ local function summary(plan, cues, options, notes, setName)
     return table.concat(lines, "\n")
 end
 
-local function main()
-    local file = chooseFile()
-    if not file then return end
-    local text = readFile(file.path)
-    if not text then
-        say("can't read", "Could not read " .. file.path)
-        return
-    end
+-- Writes the Set in `file` ({ name, path }) as `text` into a Timecode Show.
+local function import(file, text, follow)
     local setName = file.name:gsub("%.[^.]+$", "")
 
     -- The frame rate decides when Stop Actions fire, so plan once to count
@@ -1007,7 +1511,7 @@ local function main()
         return
     end
 
-    local options = chooseOptions(setName, #first.events)
+    local options = chooseOptions(setName, #first.events, follow)
     if not options then return end
     local plan = makePlan(options.rate)
     local choices, notes = mapDestinations(plan)
@@ -1043,6 +1547,300 @@ local function main()
     say("imported", ("%s is in Timecode %d and Sequence %d.\n\nTimecode %d starts by itself when timecode arrives on "
         .. "slot %d, and each cue sends its Actions at its time."):format(setName, options.timecode, options.sequence,
         options.timecode, options.slot))
+end
+
+-- MARK: The panel
+
+local SLOT_UNITS = 16777216 -- a timecode slot's Time counts 1/16777216 s
+local PANEL = "TrigITPanel"
+local RED = "Global.AlertText"
+
+-- Kept in the show's global variables, so the panel opens as it was left.
+local function setting(name) return (GetVar(GlobalVars(), "TrigIT" .. name)) end
+local function remember(name, value) SetVar(GlobalVars(), "TrigIT" .. name, value) end
+
+-- The In & Out OSC line for a Set Destination: the one named "TrigIT <name>"
+-- (an import makes it), else the first that sends to its address.
+local function lineFor(destination)
+    local byAddress
+    for _, line in ipairs(oscLines():Children()) do
+        if line.name == "TrigIT " .. destination.name then return line.no end
+        if not byAddress and tostring(line.DestinationIP) == destination.host and tonumber(line.Port) == destination.port then
+            byAddress = line.no
+        end
+    end
+    return byAddress
+end
+
+local state = { pending = nil, notice = "" }
+
+local function follow()
+    state.lastTime, state.lastMove = nil, nil
+    state.show = state.set and live.new(state.set, state.rate, lineFor, false)
+end
+
+-- An earlier import's Timecode Show fires the same Actions on its own.
+local function checkTwice()
+    local tc = previous()
+    state.twice = tc and tc.AutoStart and tonumber(tostring(tc.TCSlot)) == state.slot
+        and ("Timecode %d also fires these Actions on slot %d: disarm here, or switch off its AutoStart"):format(tc.no, state.slot)
+end
+
+local function load(file, quietly)
+    local text = readFile(file.path)
+    if not text then
+        if not quietly then say("can't read", "Could not read " .. file.path) end
+        return
+    end
+    local set
+    if file.name:lower():match("%.csv$") then
+        state.notice = "A CSV Set can be imported to a Timecode Show. To follow it here, open it in TrigIT on the Mac and save it as a .trigit file."
+    else
+        local reason
+        set, reason = trigitPlan.readSet(text)
+        if not set then
+            if not quietly then say("can't load", file.name .. "\n\n" .. reason) end
+            return
+        end
+        state.notice = ""
+    end
+    state.file, state.text, state.set = file, text, set
+    remember("SetPath", file.path)
+    remember("SetName", file.name)
+    follow()
+end
+
+local function songNamed(label)
+    for _, song in ipairs(state.set and state.set.songs or {}) do
+        if song.name == label then return song end
+    end
+end
+
+local function chooseSong(title)
+    local names = {}
+    for _, song in ipairs(state.set and state.set.songs or {}) do names[#names + 1] = song.name end
+    if #names == 0 then return nil end
+    local _, label = PopupInput({ title = title, caller = GetFocusDisplay(), items = names })
+    return songNamed(label)
+end
+
+-- What the buttons do, run from the panel's loop so dialogs can wait.
+local actions = {}
+
+function actions.load()
+    local file = chooseFile()
+    if file then load(file) end
+end
+
+function actions.settings()
+    local slots, rates = {}, {}
+    for n = 1, #Root().TimecodeSlots:Children() do slots["Slot " .. n] = n end
+    for i, rate in ipairs(RATES) do rates[rate] = i end
+    local preset = 4
+    for i, rate in ipairs(RATES) do if rate == state.rate then preset = i end end
+    local reply = MessageBox({
+        title = "TrigIT: timecode",
+        message = "The slot the show's timecode arrives on, and its frame rate. Changing them disarms the panel.",
+        commands = { { value = 1, name = "OK" }, { value = 0, name = "Cancel" } },
+        selectors = {
+            { name = "Timecode slot", type = 0, values = slots, selectedValue = state.slot },
+            { name = "Frame rate", type = 1, values = rates, selectedValue = preset },
+        },
+    })
+    if reply.result ~= 1 then return end
+    state.slot, state.rate = reply.selectors["Timecode slot"], RATES[reply.selectors["Frame rate"]]
+    remember("Slot", state.slot)
+    remember("Rate", state.rate)
+    follow()
+end
+
+function actions.fire()
+    local song = chooseSong("Song to fire")
+    if song and state.show then state.show:fire(song.id, Time()) end
+end
+
+function actions.stop()
+    local current = state.show and state.show.engine.currentSong
+    local song = current and { id = current } or chooseSong("Song to stop")
+    if song and state.show then state.show:fireStop(song.id, Time()) end
+end
+
+function actions.import()
+    if not state.file then actions.load() end
+    if not state.file then return end
+    import(state.file, state.text, { slot = state.slot, rate = state.rate })
+end
+
+local function text(parent, anchors, font, align)
+    local object = parent:Append("UIObject")
+    object.Anchors, object.Font, object.HasHover = anchors, font or "console18", "No"
+    object.TextalignmentH, object.TextalignmentV = align or "Left", "Top"
+    object.Text = ""
+    return object
+end
+
+local function button(parent, anchors, label, action)
+    local object = parent:Append("Button")
+    object.Anchors, object.Text, object.Font = anchors, label, "Medium20"
+    object.PluginComponent = myHandle
+    object.Clicked = "TrigIT" .. action
+    return object
+end
+
+local function rows(grid, sizes)
+    grid.Columns, grid.Rows = 1, #sizes
+    for i, size in ipairs(sizes) do
+        if size == "*" then
+            grid[1][i].SizePolicy = "Stretch"
+        else
+            grid[1][i].SizePolicy, grid[1][i].Size = "Fixed", tostring(size)
+        end
+    end
+end
+
+local function build(overlay)
+    local ui = {}
+    local base = overlay:Append("BaseInput")
+    base.Name, base.W, base.H = PANEL, 1300, 720
+    base.AutoClose, base.CloseOnEscape = "No", "Yes"
+    rows(base, { 60, "*" })
+    local title = base:Append("TitleBar")
+    title.Columns, title.Rows, title.Anchors = 2, 1, "0,0"
+    title[2][2].SizePolicy, title[2][2].Size = "Fixed", "60"
+    local name = title:Append("TitleButton")
+    name.Text, name.Anchors = "TrigIT", "0,0"
+    title:Append("CloseButton").Anchors = "1,0"
+
+    local frame = base:Append("DialogFrame")
+    frame.Anchors = { left = 0, right = 0, top = 1, bottom = 1 }
+    rows(frame, { 110, 50, "*", 80 })
+
+    local top = frame:Append("UILayoutGrid")
+    top.Anchors, top.Columns, top.Rows = "0,0", 3, 1
+    ui.playhead = text(top, "0,0", "console32", "Center")
+    ui.song = text(top, "1,0", "Regular32", "Center")
+    ui.playhead.TextalignmentV, ui.song.TextalignmentV = "Center", "Center"
+    ui.arm = button(top, "2,0", "", "Arm")
+    ui.arm.Font = "Regular28"
+
+    ui.status = text(frame, "0,1", "Regular20", "Center")
+    ui.status.TextalignmentV = "Center"
+
+    local lists = frame:Append("UILayoutGrid")
+    lists.Anchors, lists.Columns, lists.Rows = "0,2", 2, 1
+    lists[2][1].SizePolicy, lists[2][1].Size = "Fixed", "540"
+    ui.songs = text(lists, "0,0")
+    ui.log = text(lists, "1,0")
+
+    local buttons = frame:Append("UILayoutGrid")
+    buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 5, 1
+    for i, entry in ipairs({ { "Load Set", "Load" }, { "Timecode", "Settings" }, { "Fire Song", "Fire" },
+        { "Stop Song", "Stop" }, { "Import Show", "Import" } }) do
+        button(buttons, (i - 1) .. ",0", entry[1], entry[2])
+    end
+    ui.base = base
+    return ui
+end
+
+local function put(object, property, value)
+    if object[property] ~= value then object[property] = value end
+end
+
+local ALERTS = {
+    allTimecodeLost = "Timecode lost",
+    primaryLostRunningOnBackup = "Primary timecode lost, running on backup",
+}
+
+local function render(ui, now)
+    local show = state.show
+    local engine = show and show.engine
+    local current = engine and engine.currentSong
+    local armed = engine and engine.isArmed
+
+    put(ui.playhead, "Text", engine and engine.playhead or "--:--:--:--")
+    local currentName
+    for _, song in ipairs(state.set and state.set.songs or {}) do
+        if song.id == current then currentName = song.name end
+    end
+    put(ui.song, "Text", currentName or "No Song")
+    put(ui.arm, "Text", armed and "ARMED" or "Disarmed")
+    put(ui.arm, "BackColor", armed and RED or "Button.Background")
+
+    local running = state.lastMove and now - state.lastMove < 0.5
+    local status = ("%s   |   slot %d at %s fps, %s"):format(
+        state.file and state.file.name or "No Set loaded: Load Set", state.slot, state.rate,
+        running and "timecode running" or "no timecode")
+    local alert = engine and ALERTS[engine.alert or ""]
+    local warning = alert or (armed and state.twice) or (state.notice ~= "" and state.notice)
+    put(ui.status, "Text", warning or status)
+    put(ui.status, "TextColor", warning and RED or "Global.Text")
+
+    local songs = { " SONGS" }
+    for _, song in ipairs(state.set and state.set.songs or {}) do
+        local span = song.start and (song.start .. " - " .. song["end"]) or "notes only"
+        songs[#songs + 1] = ("%s %s   %s"):format(song.id == current and ">" or " ", song.name, span)
+    end
+    put(ui.songs, "Text", table.concat(songs, "\n"))
+
+    local log = { " LAST ACTIONS" }
+    for _, entry in ipairs(show and show.log or {}) do
+        log[#log + 1] = ("%s %-11s  %s"):format(entry.failed and "!" or " ", entry.time, entry.text)
+    end
+    put(ui.log, "Text", table.concat(log, "\n"))
+end
+
+local function main()
+    local overlay = GetDisplayByIndex(1).ScreenOverlay
+    if overlay:FindRecursive(PANEL) then return end -- already open; its loop keeps running
+
+    local tc = previous()
+    state.slot = tonumber(setting("Slot")) or (tc and tonumber(tostring(tc.TCSlot))) or 1
+    state.rate = setting("Rate") or (tc and tostring(tc:Get("Note")):match("Frame rate: (.+)$")) or "30"
+    local path, name = setting("SetPath"), setting("SetName")
+    if path and name then load({ path = path, name = name }, true) end
+
+    local ui = build(overlay)
+    for _, action in ipairs({ "Load", "Settings", "Fire", "Stop", "Import" }) do
+        signalTable["TrigIT" .. action] = function() state.pending = action:lower() end
+    end
+    signalTable.TrigITArm = function()
+        if state.show then state.show:setArmed(not state.show.engine.isArmed) end
+    end
+
+    while IsObjectValid(ui.base) do
+        local now = Time()
+        local action = state.pending
+        state.pending = nil
+        if action then
+            local ok, problem = pcall(actions[action])
+            if not ok then ErrPrintf("TrigIT: " .. tostring(problem)) end
+        end
+        local show = state.show
+        if show then
+            local slot = Root().TimecodeSlots[state.slot]
+            local time = slot and slot.Time
+            -- The slot's first value may be left from long ago: follow it once it moves.
+            if time and time ~= state.lastTime then
+                if state.lastTime then
+                    show:follow(time / SLOT_UNITS, now)
+                    state.lastMove = now
+                end
+                state.lastTime = time
+            end
+            show:tick(now)
+            for _, command in ipairs(show:take()) do
+                local result = Cmd(command)
+                if result ~= "OK" then show:note(("%s: %s"):format(command, tostring(result)), true) end
+            end
+        end
+        -- An import, or someone at the console, may change an imported Timecode.
+        if now - (state.checked or 0) > 1 then
+            checkTwice()
+            state.checked = now
+        end
+        render(ui, now)
+        coroutine.yield(0.02)
+    end
 end
 
 return main

@@ -1,10 +1,14 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
--- The grandMA3 side of the plugin: pick a Set file, choose where things go,
--- and write a Timecode Show that fires the Set's Actions. Everything that
--- touches MA lives here; the rules are in trigit_plan.lua and ma3.lua.
---
--- What it writes, all marked with MARK in their Note so a re-import finds
--- and replaces them:
+-- The grandMA3 side of the plugin, everything that touches MA. Running it
+-- opens the TrigIT panel: it loads a Set, follows a timecode slot with the
+-- Show Engine (live.lua) and sends the Actions while Armed, and can import the
+-- Set as a Timecode Show that fires the Actions without the plugin running.
+-- The rules are in src/.
+
+local pluginName, componentName, signalTable, myHandle = ...
+
+-- What an import writes, all marked with MARK in their Note so a re-import
+-- finds and replaces them:
 --   Sequence <n>  one cue per moment; each cue's Command sends that moment's
 --                 Actions (SendOSC / SendMIDI).
 --   Timecode <n>  one track playing that sequence, with a Goto event per cue
@@ -13,6 +17,7 @@
 
 local trigitPlan = require("trigit_plan")
 local ma3 = require("ma3")
+local live = require("live")
 
 local MARK = "Made by the TrigIT plugin. Importing a Set again replaces it."
 local RATES = { "24", "25", "29.97 DF", "30" }
@@ -102,13 +107,13 @@ local function previous()
     end
 end
 
-local function chooseOptions(setName, eventCount)
+local function chooseOptions(setName, eventCount, follow)
     local tc, seq = previous()
     local defaults = {
         timecode = tc and tc.no or firstFree(DataPool().Timecodes, 1),
         sequence = seq and seq.no or firstFree(DataPool().Sequences, 101),
-        slot = tc and tonumber(tostring(tc.TCSlot)) or 1,
-        rate = tc and tostring(tc:Get("Note")):match("Frame rate: (.+)$") or "30",
+        slot = follow.slot,
+        rate = follow.rate,
     }
     local slots = {}
     for n = 1, 16 do slots["Slot " .. n] = n end
@@ -331,14 +336,8 @@ local function summary(plan, cues, options, notes, setName)
     return table.concat(lines, "\n")
 end
 
-local function main()
-    local file = chooseFile()
-    if not file then return end
-    local text = readFile(file.path)
-    if not text then
-        say("can't read", "Could not read " .. file.path)
-        return
-    end
+-- Writes the Set in `file` ({ name, path }) as `text` into a Timecode Show.
+local function import(file, text, follow)
     local setName = file.name:gsub("%.[^.]+$", "")
 
     -- The frame rate decides when Stop Actions fire, so plan once to count
@@ -359,7 +358,7 @@ local function main()
         return
     end
 
-    local options = chooseOptions(setName, #first.events)
+    local options = chooseOptions(setName, #first.events, follow)
     if not options then return end
     local plan = makePlan(options.rate)
     local choices, notes = mapDestinations(plan)
@@ -395,6 +394,300 @@ local function main()
     say("imported", ("%s is in Timecode %d and Sequence %d.\n\nTimecode %d starts by itself when timecode arrives on "
         .. "slot %d, and each cue sends its Actions at its time."):format(setName, options.timecode, options.sequence,
         options.timecode, options.slot))
+end
+
+-- MARK: The panel
+
+local SLOT_UNITS = 16777216 -- a timecode slot's Time counts 1/16777216 s
+local PANEL = "TrigITPanel"
+local RED = "Global.AlertText"
+
+-- Kept in the show's global variables, so the panel opens as it was left.
+local function setting(name) return (GetVar(GlobalVars(), "TrigIT" .. name)) end
+local function remember(name, value) SetVar(GlobalVars(), "TrigIT" .. name, value) end
+
+-- The In & Out OSC line for a Set Destination: the one named "TrigIT <name>"
+-- (an import makes it), else the first that sends to its address.
+local function lineFor(destination)
+    local byAddress
+    for _, line in ipairs(oscLines():Children()) do
+        if line.name == "TrigIT " .. destination.name then return line.no end
+        if not byAddress and tostring(line.DestinationIP) == destination.host and tonumber(line.Port) == destination.port then
+            byAddress = line.no
+        end
+    end
+    return byAddress
+end
+
+local state = { pending = nil, notice = "" }
+
+local function follow()
+    state.lastTime, state.lastMove = nil, nil
+    state.show = state.set and live.new(state.set, state.rate, lineFor, false)
+end
+
+-- An earlier import's Timecode Show fires the same Actions on its own.
+local function checkTwice()
+    local tc = previous()
+    state.twice = tc and tc.AutoStart and tonumber(tostring(tc.TCSlot)) == state.slot
+        and ("Timecode %d also fires these Actions on slot %d: disarm here, or switch off its AutoStart"):format(tc.no, state.slot)
+end
+
+local function load(file, quietly)
+    local text = readFile(file.path)
+    if not text then
+        if not quietly then say("can't read", "Could not read " .. file.path) end
+        return
+    end
+    local set
+    if file.name:lower():match("%.csv$") then
+        state.notice = "A CSV Set can be imported to a Timecode Show. To follow it here, open it in TrigIT on the Mac and save it as a .trigit file."
+    else
+        local reason
+        set, reason = trigitPlan.readSet(text)
+        if not set then
+            if not quietly then say("can't load", file.name .. "\n\n" .. reason) end
+            return
+        end
+        state.notice = ""
+    end
+    state.file, state.text, state.set = file, text, set
+    remember("SetPath", file.path)
+    remember("SetName", file.name)
+    follow()
+end
+
+local function songNamed(label)
+    for _, song in ipairs(state.set and state.set.songs or {}) do
+        if song.name == label then return song end
+    end
+end
+
+local function chooseSong(title)
+    local names = {}
+    for _, song in ipairs(state.set and state.set.songs or {}) do names[#names + 1] = song.name end
+    if #names == 0 then return nil end
+    local _, label = PopupInput({ title = title, caller = GetFocusDisplay(), items = names })
+    return songNamed(label)
+end
+
+-- What the buttons do, run from the panel's loop so dialogs can wait.
+local actions = {}
+
+function actions.load()
+    local file = chooseFile()
+    if file then load(file) end
+end
+
+function actions.settings()
+    local slots, rates = {}, {}
+    for n = 1, #Root().TimecodeSlots:Children() do slots["Slot " .. n] = n end
+    for i, rate in ipairs(RATES) do rates[rate] = i end
+    local preset = 4
+    for i, rate in ipairs(RATES) do if rate == state.rate then preset = i end end
+    local reply = MessageBox({
+        title = "TrigIT: timecode",
+        message = "The slot the show's timecode arrives on, and its frame rate. Changing them disarms the panel.",
+        commands = { { value = 1, name = "OK" }, { value = 0, name = "Cancel" } },
+        selectors = {
+            { name = "Timecode slot", type = 0, values = slots, selectedValue = state.slot },
+            { name = "Frame rate", type = 1, values = rates, selectedValue = preset },
+        },
+    })
+    if reply.result ~= 1 then return end
+    state.slot, state.rate = reply.selectors["Timecode slot"], RATES[reply.selectors["Frame rate"]]
+    remember("Slot", state.slot)
+    remember("Rate", state.rate)
+    follow()
+end
+
+function actions.fire()
+    local song = chooseSong("Song to fire")
+    if song and state.show then state.show:fire(song.id, Time()) end
+end
+
+function actions.stop()
+    local current = state.show and state.show.engine.currentSong
+    local song = current and { id = current } or chooseSong("Song to stop")
+    if song and state.show then state.show:fireStop(song.id, Time()) end
+end
+
+function actions.import()
+    if not state.file then actions.load() end
+    if not state.file then return end
+    import(state.file, state.text, { slot = state.slot, rate = state.rate })
+end
+
+local function text(parent, anchors, font, align)
+    local object = parent:Append("UIObject")
+    object.Anchors, object.Font, object.HasHover = anchors, font or "console18", "No"
+    object.TextalignmentH, object.TextalignmentV = align or "Left", "Top"
+    object.Text = ""
+    return object
+end
+
+local function button(parent, anchors, label, action)
+    local object = parent:Append("Button")
+    object.Anchors, object.Text, object.Font = anchors, label, "Medium20"
+    object.PluginComponent = myHandle
+    object.Clicked = "TrigIT" .. action
+    return object
+end
+
+local function rows(grid, sizes)
+    grid.Columns, grid.Rows = 1, #sizes
+    for i, size in ipairs(sizes) do
+        if size == "*" then
+            grid[1][i].SizePolicy = "Stretch"
+        else
+            grid[1][i].SizePolicy, grid[1][i].Size = "Fixed", tostring(size)
+        end
+    end
+end
+
+local function build(overlay)
+    local ui = {}
+    local base = overlay:Append("BaseInput")
+    base.Name, base.W, base.H = PANEL, 1300, 720
+    base.AutoClose, base.CloseOnEscape = "No", "Yes"
+    rows(base, { 60, "*" })
+    local title = base:Append("TitleBar")
+    title.Columns, title.Rows, title.Anchors = 2, 1, "0,0"
+    title[2][2].SizePolicy, title[2][2].Size = "Fixed", "60"
+    local name = title:Append("TitleButton")
+    name.Text, name.Anchors = "TrigIT", "0,0"
+    title:Append("CloseButton").Anchors = "1,0"
+
+    local frame = base:Append("DialogFrame")
+    frame.Anchors = { left = 0, right = 0, top = 1, bottom = 1 }
+    rows(frame, { 110, 50, "*", 80 })
+
+    local top = frame:Append("UILayoutGrid")
+    top.Anchors, top.Columns, top.Rows = "0,0", 3, 1
+    ui.playhead = text(top, "0,0", "console32", "Center")
+    ui.song = text(top, "1,0", "Regular32", "Center")
+    ui.playhead.TextalignmentV, ui.song.TextalignmentV = "Center", "Center"
+    ui.arm = button(top, "2,0", "", "Arm")
+    ui.arm.Font = "Regular28"
+
+    ui.status = text(frame, "0,1", "Regular20", "Center")
+    ui.status.TextalignmentV = "Center"
+
+    local lists = frame:Append("UILayoutGrid")
+    lists.Anchors, lists.Columns, lists.Rows = "0,2", 2, 1
+    lists[2][1].SizePolicy, lists[2][1].Size = "Fixed", "540"
+    ui.songs = text(lists, "0,0")
+    ui.log = text(lists, "1,0")
+
+    local buttons = frame:Append("UILayoutGrid")
+    buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 5, 1
+    for i, entry in ipairs({ { "Load Set", "Load" }, { "Timecode", "Settings" }, { "Fire Song", "Fire" },
+        { "Stop Song", "Stop" }, { "Import Show", "Import" } }) do
+        button(buttons, (i - 1) .. ",0", entry[1], entry[2])
+    end
+    ui.base = base
+    return ui
+end
+
+local function put(object, property, value)
+    if object[property] ~= value then object[property] = value end
+end
+
+local ALERTS = {
+    allTimecodeLost = "Timecode lost",
+    primaryLostRunningOnBackup = "Primary timecode lost, running on backup",
+}
+
+local function render(ui, now)
+    local show = state.show
+    local engine = show and show.engine
+    local current = engine and engine.currentSong
+    local armed = engine and engine.isArmed
+
+    put(ui.playhead, "Text", engine and engine.playhead or "--:--:--:--")
+    local currentName
+    for _, song in ipairs(state.set and state.set.songs or {}) do
+        if song.id == current then currentName = song.name end
+    end
+    put(ui.song, "Text", currentName or "No Song")
+    put(ui.arm, "Text", armed and "ARMED" or "Disarmed")
+    put(ui.arm, "BackColor", armed and RED or "Button.Background")
+
+    local running = state.lastMove and now - state.lastMove < 0.5
+    local status = ("%s   |   slot %d at %s fps, %s"):format(
+        state.file and state.file.name or "No Set loaded: Load Set", state.slot, state.rate,
+        running and "timecode running" or "no timecode")
+    local alert = engine and ALERTS[engine.alert or ""]
+    local warning = alert or (armed and state.twice) or (state.notice ~= "" and state.notice)
+    put(ui.status, "Text", warning or status)
+    put(ui.status, "TextColor", warning and RED or "Global.Text")
+
+    local songs = { " SONGS" }
+    for _, song in ipairs(state.set and state.set.songs or {}) do
+        local span = song.start and (song.start .. " - " .. song["end"]) or "notes only"
+        songs[#songs + 1] = ("%s %s   %s"):format(song.id == current and ">" or " ", song.name, span)
+    end
+    put(ui.songs, "Text", table.concat(songs, "\n"))
+
+    local log = { " LAST ACTIONS" }
+    for _, entry in ipairs(show and show.log or {}) do
+        log[#log + 1] = ("%s %-11s  %s"):format(entry.failed and "!" or " ", entry.time, entry.text)
+    end
+    put(ui.log, "Text", table.concat(log, "\n"))
+end
+
+local function main()
+    local overlay = GetDisplayByIndex(1).ScreenOverlay
+    if overlay:FindRecursive(PANEL) then return end -- already open; its loop keeps running
+
+    local tc = previous()
+    state.slot = tonumber(setting("Slot")) or (tc and tonumber(tostring(tc.TCSlot))) or 1
+    state.rate = setting("Rate") or (tc and tostring(tc:Get("Note")):match("Frame rate: (.+)$")) or "30"
+    local path, name = setting("SetPath"), setting("SetName")
+    if path and name then load({ path = path, name = name }, true) end
+
+    local ui = build(overlay)
+    for _, action in ipairs({ "Load", "Settings", "Fire", "Stop", "Import" }) do
+        signalTable["TrigIT" .. action] = function() state.pending = action:lower() end
+    end
+    signalTable.TrigITArm = function()
+        if state.show then state.show:setArmed(not state.show.engine.isArmed) end
+    end
+
+    while IsObjectValid(ui.base) do
+        local now = Time()
+        local action = state.pending
+        state.pending = nil
+        if action then
+            local ok, problem = pcall(actions[action])
+            if not ok then ErrPrintf("TrigIT: " .. tostring(problem)) end
+        end
+        local show = state.show
+        if show then
+            local slot = Root().TimecodeSlots[state.slot]
+            local time = slot and slot.Time
+            -- The slot's first value may be left from long ago: follow it once it moves.
+            if time and time ~= state.lastTime then
+                if state.lastTime then
+                    show:follow(time / SLOT_UNITS, now)
+                    state.lastMove = now
+                end
+                state.lastTime = time
+            end
+            show:tick(now)
+            for _, command in ipairs(show:take()) do
+                local result = Cmd(command)
+                if result ~= "OK" then show:note(("%s: %s"):format(command, tostring(result)), true) end
+            end
+        end
+        -- An import, or someone at the console, may change an imported Timecode.
+        if now - (state.checked or 0) > 1 then
+            checkTwice()
+            state.checked = now
+        end
+        render(ui, now)
+        coroutine.yield(0.02)
+    end
 end
 
 return main
