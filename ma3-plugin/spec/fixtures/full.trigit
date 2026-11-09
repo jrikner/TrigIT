@@ -1,0 +1,180 @@
+{
+  "format" : "TrigIT Set",
+  "set" : {
+    "destinations" : [
+      {
+        "dmxHost" : "2.255.255.255",
+        "dmxInterface" : null,
+        "dmxRefreshRate" : 30,
+        "dmxSourceName" : "TrigIT",
+        "host" : "10.0.0.20",
+        "id" : "10",
+        "name" : "Resolume",
+        "networkInterface" : "en1",
+        "port" : 7000,
+        "replyPort" : 7001,
+        "sacnPriority" : 100,
+        "usesDMX" : false,
+        "usesMIDI" : false,
+        "usesOSC" : true
+      },
+      {
+        "dmxHost" : "2.255.255.255",
+        "dmxInterface" : null,
+        "dmxOutput" : "artNet",
+        "dmxRefreshRate" : 30,
+        "dmxSourceName" : "TrigIT",
+        "host" : "2.255.255.255",
+        "id" : "11",
+        "midiOutput" : {
+          "name" : "MA3 MIDI",
+          "uniqueID" : -123456
+        },
+        "name" : "MA3",
+        "port" : 8000,
+        "sacnPriority" : 100,
+        "usesDMX" : true,
+        "usesMIDI" : true,
+        "usesOSC" : true
+      }
+    ],
+    "id" : "77",
+    "name" : "Tour 2026",
+    "songs" : [
+      {
+        "end" : "01:04:00:00",
+        "id" : "18446744073709551614",
+        "name" : "Intro \"live\" ✨",
+        "start" : "01:00:00:00",
+        "startActions" : [
+          {
+            "destination" : "10",
+            "id" : "1",
+            "osc" : {
+              "address" : "/composition/columns/1/connect",
+              "arguments" : [
+                {
+                  "int" : 1
+                },
+                {
+                  "float" : 0.5
+                },
+                {
+                  "string" : "two words"
+                }
+              ]
+            },
+            "type" : "osc"
+          },
+          {
+            "destination" : "11",
+            "id" : "2",
+            "msc" : {
+              "command" : "go",
+              "commandFormat" : 127,
+              "cue" : "12.5",
+              "deviceID" : 127,
+              "list" : "3"
+            },
+            "type" : "msc"
+          }
+        ],
+        "stopActions" : [
+          {
+            "destination" : "11",
+            "id" : "3",
+            "midiNote" : {
+              "channel" : 9,
+              "note" : 36,
+              "velocity" : 100
+            },
+            "type" : "midiNote"
+          },
+          {
+            "destination" : "11",
+            "dmxPulse" : {
+              "channel" : 101,
+              "duration" : 0.25,
+              "universe" : 2,
+              "value" : 200
+            },
+            "id" : "4",
+            "type" : "dmxPulse"
+          }
+        ]
+      },
+      {
+        "end" : "02:01:30:00",
+        "id" : "2",
+        "name" : "DJ Pull-up",
+        "start" : "02:00:00:00",
+        "startActions" : [
+
+        ],
+        "stopActions" : [
+
+        ]
+      },
+      {
+        "id" : "3",
+        "name" : "Start Note only",
+        "startActions" : [
+          {
+            "destination" : "11",
+            "id" : "5",
+            "midiNote" : {
+              "channel" : 0,
+              "note" : 1,
+              "velocity" : 127
+            },
+            "type" : "midiNote"
+          }
+        ],
+        "startNote" : {
+          "channel" : 0,
+          "note" : 60
+        },
+        "stopActions" : [
+
+        ]
+      },
+      {
+        "id" : "4",
+        "name" : "Stop Note only",
+        "startActions" : [
+
+        ],
+        "stopActions" : [
+
+        ],
+        "stopNote" : {
+          "channel" : 0,
+          "note" : 61
+        }
+      },
+      {
+        "end" : "01:05:00:00",
+        "id" : "5",
+        "name" : "Overlaps Intro",
+        "start" : "01:03:00:00",
+        "startActions" : [
+          {
+            "destination" : "11",
+            "id" : "6",
+            "midiNote" : {
+              "channel" : 0,
+              "note" : 2,
+              "velocity" : 127
+            },
+            "type" : "midiNote"
+          }
+        ],
+        "stopActions" : [
+
+        ]
+      }
+    ],
+    "stopTime" : 3.5
+  },
+  "version" : 1
+}

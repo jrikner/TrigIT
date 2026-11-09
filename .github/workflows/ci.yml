@@ -48,6 +48,22 @@ jobs:
       - run: swift build
       - run: swift test
 
+  # The grandMA3 plugin's pure-Lua core (ma3-plugin), on the Lua the MA3 runs.
+  ma3-plugin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ma3-plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leafo/gh-actions-lua@v13.1.0
+        with:
+          luaVersion: "5.4.8"
+      - uses: leafo/gh-actions-luarocks@v6.1.1
+      - run: luarocks install busted 2.3.0-1
+      - run: busted
+      - run: lua build.lua --check
+
   # Keeps the core portable for the Windows version (#60), and builds the
   # Windows spike for testers (docs/windows-spike.md). Pushes to main and
   # manual runs only while the repo is private, and informational: a failure
