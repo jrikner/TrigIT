@@ -5,9 +5,9 @@
 
 local M = {}
 
-M.USAGE = 'TrigIT accepts: "open", "arm", "disarm", "toggle", "fire <Song>", "stop", "quit"'
+M.USAGE = 'TrigIT accepts: "open", "start", "arm", "disarm", "toggle", "fire <Song>", "stop", "quit"'
 
-local PLAIN = { open = true, arm = true, disarm = true, toggle = true, stop = true, quit = true }
+local PLAIN = { open = true, start = true, arm = true, disarm = true, toggle = true, stop = true, quit = true }
 
 function M.parse(text)
     text = (text or ""):match("^%s*(.-)%s*$")
