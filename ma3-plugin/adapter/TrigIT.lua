@@ -1,9 +1,12 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- The grandMA3 side of the plugin, everything that touches MA. Running it
--- opens the TrigIT panel: it loads a Set, follows a timecode slot with the
--- Show Engine (live.lua) and sends the Actions while Armed, and can import the
--- Set as a Timecode Show that fires the Actions without the plugin running.
--- The rules are in src/.
+-- opens the TrigIT panel, which follows a timecode slot in one of two modes
+-- (docs/adr/0003-ma3-plugin-modes.md):
+--   Standalone  the Show Engine (live.lua) sends the Set's Actions while Armed.
+--   Bridge      the slot goes to the TrigIT Mac app as Art-Net Timecode, and
+--               the Mac app fires.
+-- It can also import the Set as a Timecode Show that fires the Actions without
+-- the plugin running. The rules are in src/.
 
 local pluginName, componentName, signalTable, myHandle = ...
 
@@ -18,6 +21,8 @@ local pluginName, componentName, signalTable, myHandle = ...
 local trigitPlan = require("trigit_plan")
 local ma3 = require("ma3")
 local live = require("live")
+local timecode = require("timecode")
+local artnet = require("artnet")
 
 local MARK = "Made by the TrigIT plugin. Importing a Set again replaces it."
 local RATES = { "24", "25", "29.97 DF", "30" }
@@ -501,12 +506,62 @@ function actions.settings()
     follow()
 end
 
+local function onMac()
+    if state.mode ~= "Bridge" then return false end
+    if state.show then state.show:note("In bridge mode the Mac app fires: use its Show screen", true) end
+    return true
+end
+
+function actions.mode()
+    local reply = MessageBox({
+        title = "TrigIT: mode",
+        message = "Standalone: this console sends the Set's Actions while Armed.\n"
+            .. "Bridge: this console sends the timecode slot to the TrigIT Mac app as Art-Net Timecode, and the Mac app fires. "
+            .. "Choose Art-Net Timecode as its Timecode Source.\n\n"
+            .. "For bridge mode, enter the Mac's IP address, or a broadcast address such as 192.168.1.255.",
+        commands = { { value = 1, name = "OK" }, { value = 0, name = "Cancel" } },
+        inputs = { { name = "Mac IP address", value = state.bridgeTo or "", whiteFilter = "0123456789." } },
+        selectors = { { name = "Mode", type = 1, values = { Standalone = 1, Bridge = 2 }, selectedValue = state.mode == "Bridge" and 2 or 1 } },
+    })
+    if reply.result ~= 1 then return end
+    local mode, ip = reply.selectors.Mode == 2 and "Bridge" or "Standalone", reply.inputs["Mac IP address"]
+    if mode == "Bridge" and not ip:match("^%d+%.%d+%.%d+%.%d+$") then
+        say("address needed", "Bridge mode needs the Mac's IP address, such as 192.168.1.20.")
+        return
+    end
+    state.mode, state.bridgeTo = mode, ip
+    remember("Mode", mode)
+    remember("BridgeTo", ip)
+    if state.show then state.show:setArmed(false) end
+end
+
+-- Bridge mode: each new frame on the slot goes to the Mac once.
+local function bridge(seconds)
+    local position = timecode.fromSeconds(seconds, state.rate)
+    if position == state.sent then return end
+    state.sent = position
+    if not state.udp then
+        local ok, socket = pcall(_ENV.require, "socket")
+        if not ok then
+            state.bridgeProblem = "LuaSocket is not available on this station, so bridge mode can't send"
+            return
+        end
+        state.udp = socket.udp()
+        state.udp:setoption("broadcast", true)
+    end
+    local ok, problem = state.udp:sendto(artnet.timecode(position, state.rate), state.bridgeTo, artnet.PORT)
+    state.bridgeProblem = not ok and ("Can't send to %s: %s"):format(state.bridgeTo, tostring(problem)) or nil
+    if ok then state.frames = (state.frames or 0) + 1 end
+end
+
 function actions.fire()
+    if onMac() then return end
     local song = chooseSong("Song to fire")
     if song and state.show then state.show:fire(song.id, Time()) end
 end
 
 function actions.stop()
+    if onMac() then return end
     local current = state.show and state.show.engine.currentSong
     local song = current and { id = current } or chooseSong("Song to stop")
     if song and state.show then state.show:fireStop(song.id, Time()) end
@@ -580,8 +635,8 @@ local function build(overlay)
     ui.log = text(lists, "1,0")
 
     local buttons = frame:Append("UILayoutGrid")
-    buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 5, 1
-    for i, entry in ipairs({ { "Load Set", "Load" }, { "Timecode", "Settings" }, { "Fire Song", "Fire" },
+    buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 6, 1
+    for i, entry in ipairs({ { "Load Set", "Load" }, { "Timecode", "Settings" }, { "Mode", "Mode" }, { "Fire Song", "Fire" },
         { "Stop Song", "Stop" }, { "Import Show", "Import" } }) do
         button(buttons, (i - 1) .. ",0", entry[1], entry[2])
     end
@@ -610,15 +665,17 @@ local function render(ui, now)
         if song.id == current then currentName = song.name end
     end
     put(ui.song, "Text", currentName or "No Song")
-    put(ui.arm, "Text", armed and "ARMED" or "Disarmed")
+    put(ui.arm, "Text", state.mode == "Bridge" and "BRIDGE" or armed and "ARMED" or "Disarmed")
     put(ui.arm, "BackColor", armed and RED or "Button.Background")
 
     local running = state.lastMove and now - state.lastMove < 0.5
-    local status = ("%s   |   slot %d at %s fps, %s"):format(
-        state.file and state.file.name or "No Set loaded: Load Set", state.slot, state.rate,
+    local first = state.mode == "Bridge" and ("Bridge to %s, %d frames sent"):format(state.bridgeTo, state.frames or 0)
+        or state.file and state.file.name or "No Set loaded: Load Set"
+    local status = ("%s   |   slot %d at %s fps, %s"):format(first, state.slot, state.rate,
         running and "timecode running" or "no timecode")
     local alert = engine and ALERTS[engine.alert or ""]
-    local warning = alert or (armed and state.twice) or (state.notice ~= "" and state.notice)
+    local warning = alert or (state.mode == "Bridge" and state.bridgeProblem) or (armed and state.twice)
+        or (state.notice ~= "" and state.notice)
     put(ui.status, "Text", warning or status)
     put(ui.status, "TextColor", warning and RED or "Global.Text")
 
@@ -643,15 +700,16 @@ local function main()
     local tc = previous()
     state.slot = tonumber(setting("Slot")) or (tc and tonumber(tostring(tc.TCSlot))) or 1
     state.rate = setting("Rate") or (tc and tostring(tc:Get("Note")):match("Frame rate: (.+)$")) or "30"
+    state.mode, state.bridgeTo = setting("Mode") or "Standalone", setting("BridgeTo")
     local path, name = setting("SetPath"), setting("SetName")
     if path and name then load({ path = path, name = name }, true) end
 
     local ui = build(overlay)
-    for _, action in ipairs({ "Load", "Settings", "Fire", "Stop", "Import" }) do
+    for _, action in ipairs({ "Load", "Settings", "Mode", "Fire", "Stop", "Import" }) do
         signalTable["TrigIT" .. action] = function() state.pending = action:lower() end
     end
     signalTable.TrigITArm = function()
-        if state.show then state.show:setArmed(not state.show.engine.isArmed) end
+        if state.show and state.mode ~= "Bridge" then state.show:setArmed(not state.show.engine.isArmed) end
     end
 
     while IsObjectValid(ui.base) do
@@ -663,17 +721,18 @@ local function main()
             if not ok then ErrPrintf("TrigIT: " .. tostring(problem)) end
         end
         local show = state.show
-        if show then
-            local slot = Root().TimecodeSlots[state.slot]
-            local time = slot and slot.Time
-            -- The slot's first value may be left from long ago: follow it once it moves.
-            if time and time ~= state.lastTime then
-                if state.lastTime then
-                    show:follow(time / SLOT_UNITS, now)
-                    state.lastMove = now
-                end
-                state.lastTime = time
+        local slot = Root().TimecodeSlots[state.slot]
+        local time = slot and slot.Time
+        -- The slot's first value may be left from long ago: follow it once it moves.
+        if time and time ~= state.lastTime then
+            if state.lastTime then
+                if show then show:follow(time / SLOT_UNITS, now) end
+                if state.mode == "Bridge" then bridge(time / SLOT_UNITS) end
+                state.lastMove = now
             end
+            state.lastTime = time
+        end
+        if show then
             show:tick(now)
             for _, command in ipairs(show:take()) do
                 local result = Cmd(command)
@@ -686,7 +745,7 @@ local function main()
             state.checked = now
         end
         render(ui, now)
-        coroutine.yield(0.02)
+        coroutine.yield(0)
     end
 end
 
