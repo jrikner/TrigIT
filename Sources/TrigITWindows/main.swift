@@ -153,6 +153,39 @@ if let role = role(of: .ltc) {
     sourceLines.append("LTC from \"\(string(name))\" channel \(options.ltcChannel), \(Int(sampleRate)) Hz, \(buffers) ms audio buffers (\(role.rawValue))")
 }
 
+// MARK: Browser UI
+
+var uiLine: String?
+if options.uiPort != 0 {
+    var error = buffer()
+    let listener = cwio_tcp_listen(options.uiPort, &error, Int32(error.count))
+    if listener < 0 { fail("browser UI on TCP port \(options.uiPort): \(string(error)) (another --ui-port, or 0 for none)") }
+    let url = "http://127.0.0.1:\(options.uiPort)/"
+    uiLine = "Browser UI: \(url)"
+    // One request at a time: the page polls a few small requests a second.
+    let thread = Thread {
+        var request = [UInt8](repeating: 0, count: 8_192)
+        while true {
+            let connection = cwio_tcp_accept(listener)
+            guard connection >= 0 else {
+                Thread.sleep(forTimeInterval: 0.01)
+                continue
+            }
+            let count = request.withUnsafeMutableBufferPointer {
+                cwio_tcp_read_request(connection, $0.baseAddress, Int32($0.count))
+            }
+            let response = WebUI.respond(to: count > 0 ? Array(request.prefix(Int(count))) : []) {
+                lock.lock()
+                defer { lock.unlock() }
+                return session.status()
+            }
+            response.withUnsafeBufferPointer { cwio_tcp_send_and_close(connection, $0.baseAddress, Int32($0.count)) }
+        }
+    }
+    thread.start()
+    if !options.noBrowser { cwio_open_url(url) }
+}
+
 // MARK: Clock and report
 
 let tickPeriod = 0.01
@@ -168,6 +201,7 @@ cwio_on_interrupt {
 print("TrigIT Windows spike: following \(set.name) (\(set.songs.count) Songs)")
 for line in sourceLines { print("  \(line)") }
 print("Timer: \(timerName)")
+if let uiLine { print(uiLine) }
 print(options.duration.map { "Running for \($0) s; Ctrl+C stops sooner." } ?? "Press Ctrl+C to stop and write the timing report.")
 fflush(nil)
 

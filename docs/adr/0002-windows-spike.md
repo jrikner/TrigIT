@@ -20,4 +20,4 @@ From CI only (GitHub's `windows-latest`, a 2-core cloud VM, Swift 6.4.2): the sp
 - Through a pipe, a Windows console app's stdout is fully buffered, so the spike flushes after each batch of lines.
 - `ProcessInfo.operatingSystemVersionString` reported "Windows Server 2019 (build 26100)" on the CI VM; trust the build number, not the name.
 
-LTC through WASAPI, and everything on real hardware with a real network and audio interface, has not run yet. A tester's reports on #60 decide the next step (the UI approach); update this ADR with them.
+LTC through WASAPI, and everything on real hardware with a real network and audio interface, has not run yet. A tester's reports on #60 should update this ADR. The UI approach is decided in ADR 0004: a page in the browser.

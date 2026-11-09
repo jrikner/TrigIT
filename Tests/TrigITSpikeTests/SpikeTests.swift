@@ -15,6 +15,14 @@ final class SpikeOptionsTests: XCTestCase {
         XCTAssertEqual(options.ltcChannel, 1)
         XCTAssertEqual(options.artNetPort, 6454)
         XCTAssertNil(options.duration)
+        XCTAssertEqual(options.uiPort, 7319)
+        XCTAssertFalse(options.noBrowser)
+    }
+
+    func testUIOptions() throws {
+        let options = try SpikeOptions(arguments: ["show.trigit", "--ui-port", "0", "--no-browser"])
+        XCTAssertEqual(options.uiPort, 0)
+        XCTAssertTrue(options.noBrowser)
     }
 
     func testFirstSourceIsPrimarySecondIsBackup() throws {
@@ -35,7 +43,7 @@ final class SpikeOptionsTests: XCTestCase {
     func testRejectsBadArguments() {
         for arguments in [[], ["a.trigit", "b.trigit"], ["a.trigit", "--source", "mtc"],
                           ["a.trigit", "--source", "ltc", "--source", "ltc"], ["a.trigit", "--ltc-channel", "0"],
-                          ["a.trigit", "--artnet-port", "70000"], ["a.trigit", "--duration"], ["a.trigit", "--bogus"]] {
+                          ["a.trigit", "--artnet-port", "70000"], ["a.trigit", "--duration"], ["a.trigit", "--ui-port", "70000"], ["a.trigit", "--bogus"]] {
             XCTAssertThrowsError(try SpikeOptions(arguments: arguments), "\(arguments)")
         }
     }
@@ -152,5 +160,51 @@ final class SpikeSessionTests: XCTestCase {
         XCTAssertTrue(set.songs.allSatisfy { song in
             song.startActions.allSatisfy { if case .osc = $0.message { return true } else { return false } }
         })
+    }
+}
+
+final class WebUITests: XCTestCase {
+    let resolume = Destination(name: "Resolume", host: "127.0.0.1", port: 7000)
+    lazy var intro = Song(name: "Intro", start: Timecode("00:01:00:00")!, end: Timecode("00:02:00:00")!,
+                          startActions: [Action(destinationID: resolume.id, message: .osc(OSCMessage(address: "/go", arguments: [])))])
+    lazy var set = ShowSet(name: "Test", songs: [intro], destinations: [resolume])
+
+    func get(_ path: String, _ session: SpikeSession) -> String {
+        String(decoding: WebUI.respond(to: Array("GET \(path) HTTP/1.1\r\nHost: localhost\r\n\r\n".utf8)) { session.status() },
+               as: UTF8.self)
+    }
+
+    func testServesThePage() {
+        let response = get("/", SpikeSession(set: set, startedAt: 10))
+        XCTAssertTrue(response.hasPrefix("HTTP/1.1 200 OK\r\n"), response)
+        XCTAssertTrue(response.contains("Content-Type: text/html"))
+        XCTAssertTrue(response.contains("fetch(\"/status\""))
+    }
+
+    func testStatusFollowsTheEngine() throws {
+        var session = SpikeSession(set: set, startedAt: 10)
+        let packet = ArtTimeCode(fields: TimecodeFields(hours: 0, minutes: 1, seconds: 0, frames: 2), frameRate: .fps30).packet
+        for send in session.receiveArtNet(packet, arrivedAt: 11, role: .primary).sends {
+            session.sent(send, at: 11.0001, error: nil)
+        }
+        let response = get("/status?t=1", session)
+        XCTAssertTrue(response.hasPrefix("HTTP/1.1 200 OK\r\n"), response)
+        let body = Data(response.components(separatedBy: "\r\n\r\n")[1].utf8)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["playhead"] as? String, "00:01:00:02")
+        XCTAssertEqual(json["fired"] as? Int, 1)
+        let songs = try XCTUnwrap(json["songs"] as? [[String: Any]])
+        XCTAssertEqual(songs.first?["current"] as? Bool, true)
+        let fires = try XCTUnwrap(json["recentFires"] as? [[String: Any]])
+        XCTAssertEqual(fires.first?["song"] as? String, "Intro")
+        XCTAssertEqual(fires.first?["at"] as? Double, 1)
+    }
+
+    func testRejectsOtherRequests() {
+        let session = SpikeSession(set: set, startedAt: 10)
+        XCTAssertTrue(get("/nope", session).hasPrefix("HTTP/1.1 404"))
+        XCTAssertTrue(String(decoding: WebUI.respond(to: Array("POST / HTTP/1.1\r\n\r\n".utf8)) { session.status() },
+                             as: UTF8.self).hasPrefix("HTTP/1.1 405"))
+        XCTAssertTrue(String(decoding: WebUI.respond(to: []) { session.status() }, as: UTF8.self).hasPrefix("HTTP/1.1 405"))
     }
 }

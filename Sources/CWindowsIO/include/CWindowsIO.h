@@ -33,6 +33,18 @@ int32_t cwio_udp_resolve(const char *host, uint32_t *address);
 /// Sends one datagram. Returns 0, or the Winsock error code.
 int32_t cwio_udp_send(int64_t socket, uint32_t address, uint16_t port, const uint8_t *bytes, int32_t count);
 
+/// A TCP listener on 127.0.0.1 only, for the browser UI. Returns -1 on failure.
+int64_t cwio_tcp_listen(uint16_t port, char *error, int32_t error_size);
+/// Blocks for the next connection, with 2 s send and receive timeouts. Returns -1 on error.
+int64_t cwio_tcp_accept(int64_t listener);
+/// Reads up to the blank line ending an HTTP request's headers, or until `size`.
+/// Returns the bytes read, or -1.
+int32_t cwio_tcp_read_request(int64_t connection, uint8_t *buffer, int32_t size);
+/// Sends all of `bytes`, then closes the connection.
+void cwio_tcp_send_and_close(int64_t connection, const uint8_t *bytes, int32_t count);
+/// Opens a URL in the default browser.
+void cwio_open_url(const char *url);
+
 /// Lists the active audio inputs. Returns 0, or -1 with `error` filled in.
 typedef void (*cwio_audio_device_fn)(void *context, const char *name, int32_t is_default);
 int32_t cwio_audio_list(cwio_audio_device_fn each, void *context, char *error, int32_t error_size);

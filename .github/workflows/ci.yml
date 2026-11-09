@@ -106,7 +106,7 @@ jobs:
           .\TrigITWindows.exe --help
           if ($LASTEXITCODE -ne 0) { exit 1 }
           $spike = Start-Process .\TrigITWindows.exe -PassThru -NoNewWindow `
-            -ArgumentList 'windows-spike-example.trigit', '--duration', '8', '--report', 'ci-smoke-report.txt'
+            -ArgumentList 'windows-spike-example.trigit', '--duration', '8', '--report', 'ci-smoke-report.txt', '--no-browser'
           Start-Sleep -Seconds 2
           $udp = New-Object System.Net.Sockets.UdpClient
           $clock = [Diagnostics.Stopwatch]::StartNew()
@@ -118,6 +118,12 @@ jobs:
             [void]$udp.Send($packet, $packet.Length, '127.0.0.1', 6454)
             while ($clock.Elapsed.TotalMilliseconds -lt ($n + 1) * 1000 / 30) { }
           }
+          # The browser UI answers on loopback and shows the Song that just fired.
+          $page = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:7319/
+          if ($page.Content -notmatch 'fetch\("/status"') { throw "the UI page is missing" }
+          $status = Invoke-RestMethod http://127.0.0.1:7319/status
+          $status | ConvertTo-Json -Depth 4
+          if ($status.fired -ne 1) { throw "the UI status does not show the fire" }
           if (-not $spike.WaitForExit(30000)) { $spike.Kill(); throw "the spike did not stop by itself" }
           Get-Content ci-smoke-report.txt
           if (-not (Select-String -Path ci-smoke-report.txt -Pattern 'Songs fired: 1 ' -Quiet)) { throw "Song 1 did not fire" }

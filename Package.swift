@@ -43,7 +43,7 @@ targets.append(.executableTarget(name: "TrigITApp", dependencies: ["TrigITEngine
 products.append(.executable(name: "TrigITWindows", targets: ["TrigITWindows"]))
 targets.append(.target(
     name: "CWindowsIO",
-    linkerSettings: [.linkedLibrary("ws2_32"), .linkedLibrary("ole32"), .linkedLibrary("winmm"), .linkedLibrary("avrt")]
+    linkerSettings: [.linkedLibrary("ws2_32"), .linkedLibrary("ole32"), .linkedLibrary("winmm"), .linkedLibrary("avrt"), .linkedLibrary("shell32")]
 ))
 targets.append(.executableTarget(
     name: "TrigITWindows",
