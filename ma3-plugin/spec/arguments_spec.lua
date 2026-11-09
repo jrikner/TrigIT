@@ -8,7 +8,7 @@ describe("plugin arguments", function()
     end)
 
     it("reads the plain commands, in any case", function()
-        for _, verb in ipairs({ "open", "arm", "disarm", "toggle", "stop", "quit" }) do
+        for _, verb in ipairs({ "open", "start", "arm", "disarm", "toggle", "stop", "quit" }) do
             assert.same({ verb = verb }, arguments.parse(" " .. verb:upper() .. " "))
         end
     end)

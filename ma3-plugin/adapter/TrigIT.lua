@@ -726,6 +726,7 @@ local RUN = "Run"
 local function command(request)
     local verb = request.verb
     if verb == "open" then return openPanel() end
+    if verb == "start" then return end -- running already: nothing to do
     if verb == "quit" then
         state.quit = true
         return Printf("TrigIT: stopping")
@@ -749,6 +750,28 @@ local function command(request)
     local want = verb == "arm" or (verb == "toggle" and not armed)
     if want ~= armed then state.show:setArmed(want) end
     Printf("TrigIT: " .. (want and "Armed" or "Disarmed"))
+end
+
+-- MA3 has no hook for a show load, and a show load ends every plugin (#99).
+-- So the first start in a show makes a macro that starts TrigIT, for the
+-- operator to run after loading the show or to put on a key.
+local START_MACRO = "Made by the TrigIT plugin: run it after loading this show to start TrigIT, disarmed."
+
+local function startMacro()
+    if setting("StartMacro") then return end -- made once per show; deleting it turns this off
+    local pool = DataPool().Macros
+    for _, macro in ipairs(pool:Children()) do
+        if tostring(macro:Get("Note") or "") == START_MACRO then return remember("StartMacro", tostring(macro.no)) end
+    end
+    local n = 1
+    while pool[n] do n = n + 1 end
+    Cmd(('Store Macro %d "TrigIT start"'):format(n))
+    local macro = pool[n]
+    if not macro then return ErrPrintf("TrigIT: could not make the TrigIT start macro") end
+    macro:Append().Command = ('Plugin "%s" "start"'):format(plainName(myHandle:Parent().name))
+    macro.Note = START_MACRO
+    remember("StartMacro", tostring(n))
+    Printf(("TrigIT: made Macro %d \"TrigIT start\". Run it after loading this show to start TrigIT."):format(n))
 end
 
 local function main(_, text)
@@ -777,6 +800,8 @@ local function main(_, text)
     signalTable.TrigITArm = function()
         if state.show and state.mode ~= "Bridge" then state.show:setArmed(not state.show.engine.isArmed) end
     end
+    local ok, problem = pcall(startMacro)
+    if not ok then ErrPrintf("TrigIT: " .. tostring(problem)) end
     Printf("TrigIT is running. Closing its panel leaves it running; run the plugin again to reopen it, Quit to stop it.")
     command(request) -- opens the panel when asked to, or with no argument
 
