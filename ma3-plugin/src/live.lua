@@ -21,7 +21,7 @@ function live.new(set, rate, lineFor, armed)
     for _, song in ipairs(set.songs or {}) do names[song.id] = song.name end
     return setmetatable({
         engine = engine.new(set, armed), rate = rate, lineFor = lineFor, names = names,
-        log = {}, outbox = {}, later = {},
+        log = {}, outbox = {}, later = {}, fired = {},
     }, Live)
 end
 
@@ -65,6 +65,7 @@ function Live:apply(events, now)
         elseif kind == "missingDestination" then
             self:note((name or "?") .. ": an Action's Destination isn't in the Set; not sent", true)
         elseif kind == "fired" then
+            self.fired[event.song] = true
             self:note(name .. (event.cause == "manual" and " fired by hand" or " entered")
                 .. ((self.engine.isArmed or event.cause == "manual") and "" or " (disarmed: nothing sent)"))
         elseif kind == "ended" then

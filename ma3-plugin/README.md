@@ -23,17 +23,16 @@ Run the plugin (tap it, or type `Plugin <n>`). It opens the TrigIT panel:
 
 ![The TrigIT panel on onPC, following timecode](docs/panel-running.png)
 
-- **Top:** the Playhead (the timecode on the slot), the current Song, and **Armed**. Tap Armed to arm or disarm. The panel opens disarmed.
-- **Status line:** the Set, the slot and frame rate it follows, and whether timecode is running. It turns red for an alert: timecode lost, a CSV Set (which can only be imported), or an imported Timecode Show on the same slot that would fire the same Actions a second time:
+- **Top:** the Playhead (the timecode on the slot, grey while timecode is lost), the current Song with how far into it you are (`0:02 of 4:00`), the next Song and when it starts (`DJ Pull-up starts in 59:58`), and **Armed**. Tap Armed to arm or disarm; it turns red when armed. The panel opens disarmed.
+- **Status line:** the Set, the slot and frame rate it follows, and whether timecode is running. It becomes a red banner for an alert: timecode lost, a CSV Set (which can only be imported), or an imported Timecode Show on the same slot that would fire the same Actions a second time:
 
-  ![The panel warning about a Timecode Show on the same slot](docs/panel-warning.png)
+  ![The panel with timecode lost](docs/panel-warning.png)
 
-- **Songs:** the Set's Songs and their spans. `>` marks the current Song.
-- **Last actions:** what happened, newest first: Songs Entered and Ended, each Action sent, Jumps, Stops and Dropouts. `!` marks an Action that was not sent, with why.
-- **Load Set:** choose a `.trigit` file from the folders below. The panel remembers it, the slot and the frame rate in the show's global variables, and loads it next time.
-- **Timecode:** the slot and frame rate to follow. Changing them disarms the panel. The slot has no frame rate of its own, so set the incoming timecode's.
-- **Mode:** Standalone or Bridge, and for Bridge the Mac's IP address (or a broadcast address).
-- **Fire Song**, **Stop Song:** send a Song's Start or Stop Actions by hand, even while disarmed. Stop Song stops the current Song.
+- **Songs:** the Set's Songs and their spans. The current Song is green with `>`; Songs that fired are grey and marked `(fired)`. Tap a Song to send its Start or Stop Actions by hand, even while disarmed. With more than ten Songs, the list follows the current one.
+- **Recent fires:** what happened, newest first: Songs Entered and Ended, each Action sent, Jumps, Stops and Dropouts. An Action that was not sent is red, with why.
+- **Load Set:** choose a `.trigit` file from the folders below. The panel remembers it, with its settings, in the show's global variables, and loads it next time.
+- **Settings:** the timecode slot and frame rate to follow, and the mode: Standalone, or Bridge with the bridge computer's IP address (or a broadcast address). Changing any of them disarms TrigIT. MA reads the incoming frame rate but doesn't pass it on to plugins, so set it here: TrigIT needs it to place each Song's end to the frame.
+- **Stop Song:** send the current Song's Stop Actions, even while disarmed.
 - **Import Show:** write the Set as a Timecode Show (below), with the panel's slot and frame rate as defaults.
 - **Compact:** shrink the panel to the Playhead, the current Song, Armed and the status line, small enough to keep open next to the console's own views; **Full** brings the rest back. The console stays usable around the panel. Drag it by its title bar: each size reopens where you left it.
 - **Quit:** stop TrigIT. It disarms, stops following timecode and sends nothing until you run the plugin again. The panel stays, saying TrigIT stopped: close it with its ✖.
@@ -66,9 +65,9 @@ Loading a show ends every plugin, TrigIT too, and MA3 has no hook to start one w
 
 ## Bridge mode
 
-![The panel in bridge mode](docs/panel-bridge.png)
+![The panel in bridge mode, before the redesign in #97](docs/panel-bridge.png)
 
-The plugin sends each new frame on the slot to the Mac as an ArtTimeCode packet (UDP 6454, stream 0), with LuaSocket. In the Mac app, choose Art-Net Timecode as the Timecode Source. The panel shows the frames sent. It still loads a Set and runs the engine, always disarmed, so you can see the Song the Mac should be in. Arm, Fire Song and Stop Song are on the Mac.
+The plugin sends each new frame on the slot to the Mac as an ArtTimeCode packet (UDP 6454, stream 0), with LuaSocket. In the Mac app, choose Art-Net Timecode as the Timecode Source. The panel shows the frames sent. It still loads a Set and runs the engine, always disarmed, so you can see the Song the Mac should be in. Arming and firing are on the Mac.
 
 It is not frame-accurate: MA updates a slot about 24 times a second, so the Mac gets about 20 frames a second, with steps of one or two frames. That is within the Mac engine's Jump tolerance, but firing can be up to two frames later than from the source itself. MA also runs the slot on for its afterroll (0.5 s) when timecode stops.
 
@@ -95,6 +94,7 @@ OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose 
 
 - The panel: Load Set, Timecode, Fire Song and Import Show open their dialogs and work; Armed toggles; the panel stays live while its loop runs at about 30 Hz.
 - Closing the panel (#94): with the panel closed and Armed, the slot's generator running across 01:00:00:00 Entered Intro and sent its Action; running the plugin again reopened the panel on the same run with that log. Quit disarmed and stopped it, with the panel left open saying so. A changed run token (as after a re-import or a show load) stopped the loop and closed its panel.
+- Panel (#97): Playhead, current Song with its progress, next Song with its countdown, the red alert banner, fired and current Song rows; tapping a Song row offered Fire Start, Fire Stop and Cancel, and Fire Start sent it; Settings showed slot, rate, mode and IP in one dialog.
 - Commands (#98), sent with `Plugin <n> "..."`: `arm` started TrigIT without its panel, Armed; `open` showed it; `fire intro` fired Intro; `toggle` disarmed; `stop` stopped the current Song; `quit` stopped TrigIT; unknown commands and Songs changed nothing.
 - Compact panel (#95): Compact and Full switch; the rest of onPC stayed usable with the compact panel open; dragged, it came back at the same place after Full and Compact; `screen 2` was refused on a one-screen onPC and `screen 1` stored.
 - Start macro (#99): the first `start` made Macro "TrigIT start"; after the loop was stopped as a show load would, running the macro started TrigIT again, disarmed, without its panel; running it again changed nothing; no second macro was made.
@@ -147,7 +147,7 @@ You need Lua 5.4 (the MA3 runs 5.4.8) and `luarocks install busted`. The adapter
 4. Send Art-Net Timecode from 00:59:58:00 to that machine from any Art-Net timecode generator, and check that `/composition/columns/1/connect 1` arrives at 01:00:00:00.
 5. Import a changed Set and check that the Timecode and Sequence were replaced, not added.
 6. Switch off the Timecode's AutoStart, Load Set the example in the panel, arm it, and send the timecode again: the panel shows the Playhead and Intro, and the message arrives once. With AutoStart on, the status line warns.
-7. Tap Mode, choose Bridge and an address where something listens on UDP 6454 (the Mac app with Art-Net Timecode as its source), send the timecode again, and check that it follows and that the panel counts frames sent.
+7. Tap Settings, choose Bridge and an address where something listens on UDP 6454 (the Mac app with Art-Net Timecode as its source), send the timecode again, and check that it follows and that the panel counts frames sent.
 
 ## The plan
 
