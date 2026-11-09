@@ -65,6 +65,10 @@ shasum -a 256 ~/Downloads/TrigIT.zip
 
 A Homebrew install will come later.
 
+### Windows (preview)
+
+TrigIT isn't on Windows yet. A preview runs in a command window and shows a status page in your browser: it follows Art-Net Timecode or LTC and fires a Set's OSC Actions. Download it and test it with [the Windows guide](docs/windows-spike.md). It needs Windows 10 or 11 (64-bit, x64). To build it from source, see [CONTRIBUTING.md](CONTRIBUTING.md#building-on-windows).
+
 ### Permissions on first use
 
 macOS asks for two permissions. Click **Allow** for both, or TrigIT can't do its job:

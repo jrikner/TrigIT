@@ -17,6 +17,25 @@ The package has three parts:
 
 The protocols and the engine build and test on Linux too, and CI runs `swift test` on Linux and macOS for every PR. Keep them free of Apple-only frameworks.
 
+## Building on Windows
+
+Only the core and the Windows preview build on Windows (`TrigITApp` is macOS only). See [ADR 0002](docs/adr/0002-windows-spike.md) and [ADR 0004](docs/adr/0004-windows-browser-ui.md) for how it's put together.
+
+1. Install the Swift toolchain for Windows, version 6.4.2 (CI's `SWIFT_VERSION`), following [swift.org/install/windows](https://www.swift.org/install/windows/). It installs Visual Studio's C++ build tools and the Windows SDK too. Use a newer toolchain only if CI moves to it.
+2. Install [Git for Windows](https://git-scm.com/download/win) and clone the repository.
+3. In a new terminal (so the toolchain is on the PATH), in the repository folder:
+
+   ```powershell
+   swift build
+   swift test
+   swift build -c release --product TrigITWindows
+   .build\release\TrigITWindows.exe docs\windows-spike-example.trigit
+   ```
+
+The last line follows Art-Net Timecode on UDP port 6454 and opens the status page at <http://127.0.0.1:7319/>. `--help` lists the options, and [the Windows guide](docs/windows-spike.md) explains the test.
+
+Windows API calls go through the small C shim in `Sources/CWindowsIO`. Keep logic in the portable `TrigITSpike` target, so `swift test` covers it on the Mac and Linux too. CI's `windows` job builds, tests and smoke-runs the preview on every push to main; on a pull request, run it by hand with **Actions → CI → Run workflow** on your branch.
+
 ## Words and decisions
 
 - Use the vocabulary in [GLOSSARY.md](GLOSSARY.md): Set, Song, Destination, Start Actions and so on. The Set is `ShowSet` in code because `Set` clashes with the Swift standard library.
