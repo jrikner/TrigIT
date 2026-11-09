@@ -1,0 +1,91 @@
+name: Release
+
+# Pushing a tag such as v1.0.0 or v0.9.0-beta.1 builds TrigIT, signs it with
+# the Developer ID, notarizes and staples it, and publishes a GitHub Release
+# with the zip and its SHA-256. Tags with a "-" are marked as pre-releases.
+# The secrets are listed in docs/release.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Check the secrets are set
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+        run: |
+          missing=0
+          for name in DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD NOTARY_APPLE_ID NOTARY_TEAM_ID NOTARY_APP_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing repository secret $name (see docs/release.md)"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # build-app.sh numbers the build by commit count
+
+      # A throwaway keychain, made the default so codesign and notarytool find
+      # the certificate and the notary profile in it.
+      - name: Import the Developer ID certificate and notary credentials
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+
+          echo "$DEVELOPER_ID_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KEYCHAIN" \
+            -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/developer-id.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/ { print $2; exit }')"
+          if [[ -z "$IDENTITY" ]]; then
+            echo "::error::DEVELOPER_ID_P12_BASE64 holds no Developer ID Application identity"
+            exit 1
+          fi
+          echo "TRIGIT_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+          xcrun notarytool store-credentials TrigIT \
+            --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_APP_PASSWORD"
+
+      - name: Build, sign, notarize and staple
+        run: |
+          # CFBundleShortVersionString takes numbers only: v0.9.0-beta.1 → 0.9.0.
+          VERSION="${TAG#v}"
+          TRIGIT_VERSION="${VERSION%%-*}" scripts/sign-and-notarize.sh
+          xcrun stapler validate build/TrigIT.app
+          (cd build && shasum -a 256 TrigIT.zip > TrigIT.zip.sha256)
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=()
+          [[ "$TAG" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$TAG" build/TrigIT.zip build/TrigIT.zip.sha256 \
+            --verify-tag --generate-notes --title "TrigIT ${TAG#v}" "${prerelease[@]}"
