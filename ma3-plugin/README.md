@@ -1,6 +1,6 @@
 # TrigIT for grandMA3
 
-A grandMA3 plugin that imports a TrigIT Set (a `.trigit` file or a CSV) and builds a Timecode Show from it, so the console fires the Set's OSC and MIDI Actions at the right timecode by itself (map issue #30). MA's own timecode engine does the firing. The plugin only writes the show.
+A grandMA3 plugin that runs a TrigIT Set on the console. Its panel loads a Set (a `.trigit` file), follows a timecode slot with TrigIT's Show Engine, and sends the Set's OSC and MIDI Actions while Armed (#47). It can also import a Set (`.trigit` or CSV) as a Timecode Show, so MA's own timecode engine fires the Actions without the plugin running (#30).
 
 Tested on **grandMA3 onPC 2.5.1** (macOS), not yet on a console (spike #43). It is written for 2.5; older versions may refuse the plugin file.
 
@@ -12,9 +12,31 @@ Tested on **grandMA3 onPC 2.5.1** (macOS), not yet on a console (spike #43). It 
 2. In a Plugins pool window, edit an empty pool object, tap **Import**, and choose `TrigIT.xml`. Or type `Import Plugin <n> /Path "<that folder>" /File "TrigIT.xml"` on the command line.
 3. Put your Set files in `gma3_library/trigit/`, or at the top of a USB stick, or in a `trigit` folder on it. Export the `.trigit` from the Mac app, or write a CSV (below).
 
-## Use
+## The panel
 
-Run the plugin (tap it, or type `Plugin <n>`). It asks, one dialog at a time:
+Run the plugin (tap it, or type `Plugin <n>`). It opens the TrigIT panel:
+
+![The TrigIT panel on onPC, following timecode](docs/panel-running.png)
+
+- **Top:** the Playhead (the timecode on the slot), the current Song, and **Armed**. Tap Armed to arm or disarm. The panel opens disarmed.
+- **Status line:** the Set, the slot and frame rate it follows, and whether timecode is running. It turns red for an alert: timecode lost, a CSV Set (which can only be imported), or an imported Timecode Show on the same slot that would fire the same Actions a second time:
+
+  ![The panel warning about a Timecode Show on the same slot](docs/panel-warning.png)
+
+- **Songs:** the Set's Songs and their spans. `>` marks the current Song.
+- **Last actions:** what happened, newest first: Songs Entered and Ended, each Action sent, Jumps, Stops and Dropouts. `!` marks an Action that was not sent, with why.
+- **Load Set:** choose a `.trigit` file from the folders below. The panel remembers it, the slot and the frame rate in the show's global variables, and loads it next time.
+- **Timecode:** the slot and frame rate to follow. Changing them disarms the panel.
+- **Fire Song**, **Stop Song:** send a Song's Start or Stop Actions by hand, even while disarmed. Stop Song stops the current Song.
+- **Import Show:** write the Set as a Timecode Show (below), with the panel's slot and frame rate as defaults.
+
+The panel sends OSC on the In & Out line named `TrigIT <Destination>` (an import makes it), or else the first line with the Destination's IP and port. Close the panel with its ✖: nothing is sent while it is closed.
+
+Use the panel or an imported Timecode Show for a Set, not both: both fire the same Actions.
+
+## Import Show
+
+**Import Show** asks, one dialog at a time:
 
 1. **Which Set.** It lists every `.trigit` and `.csv` it finds in those folders.
 2. **Frame rate, timecode slot, and numbers.** The frame rate is the incoming timecode's: the Set stores none, and it decides when Stop Actions fire. The Timecode and Sequence numbers must be free or from an earlier TrigIT import. It suggests free ones.
@@ -33,12 +55,17 @@ OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose 
 
 ## What was checked on onPC 2.5.1
 
+- The panel: Load Set, Timecode, Fire Song and Import Show open their dialogs and work; Armed toggles; the panel stays live while its loop runs at about 30 Hz, and closing it ends the loop.
+- Armed, with Art-Net Timecode from 00:59:58:00 on slot 1 at 30 fps: the panel shows the Playhead, Enters Intro at 01:00:00:00 and sends `/composition/columns/1/connect 1` once. When timecode stops it shows Timecode lost, then logs the Stop after the Stop time. Fire Song sends while disarmed.
+
 - `SendOSC` sends the same bytes as the Mac app for int, float and string arguments, UTF-8, `;` inside strings, and messages with no arguments (`"/address,"`). MA3 refuses a bare `"/address"`.
 - The example Set, imported with Art-Net Timecode on slot 1, fires Resolume's `/composition/columns/1/connect 1` 25–58 ms after 01:00:00:00 arrives at 30 fps, over 4 runs, and a 4-cue Set fires each cue 52–59 ms after its frame at 25 fps. That is one to two frames, from MA3's own timecode handling.
 - Importing a second Set replaces the first: one Timecode, one Sequence, and the same OSC line.
 - Timecode events targeting a **macro** never ran in onPC 2.5.1, so the plugin targets a sequence and puts the commands in cue Commands.
 
 ## Differences from the Mac app
+
+The panel runs the Mac app's Show Engine, with the same rules. It follows one slot: no Backup Timecode Source, and no Start or Stop Notes yet, since MIDI input to a plugin is unchecked (#43). A CSV Set can be imported but not followed. The differences below are those of an imported Timecode Show.
 
 - **Jumps:** starting timecode in the middle of a Song doesn't fire its Start Actions. The Mac app does, because a Jump landing inside a Song Enters it. MA3 only fires events the playhead passes.
 - **Stops:** MA3 runs on for its slot's afterroll (0.5 s by default) when timecode stops, so a Stop cue within that time still fires.
@@ -51,9 +78,11 @@ OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose 
 - `src/trigit_plan.lua`: `fromCSV(text, options)` and `fromTrigit(text, options)` turn a Set into a plan. Pure Lua, no MA calls.
 - `src/ma3.lua`: turns a plan into the cues the plugin writes. Pure Lua.
 - `src/commands.lua`: every MA3 command the plugin writes, formatted in one place.
-- `src/engine.lua` and `src/timecode.lua`: TrigIT's Show Engine ported from `Sources/TrigITEngine/ShowEngine.swift` for the full plugin (#47). Pure Lua, not used by the importer yet. `spec/engine_spec.lua` ports the Swift engine tests one for one.
+- `src/engine.lua` and `src/timecode.lua`: TrigIT's Show Engine ported from `Sources/TrigITEngine/ShowEngine.swift` (#47). Pure Lua. `spec/engine_spec.lua` ports the Swift engine tests one for one.
+- `src/live.lua`: the engine on the console: slot seconds in, MA commands and the panel's log out. Pure Lua.
 - `src/json.lua`: a small JSON decoder for `.trigit` files.
-- `adapter/TrigIT.lua`: the MA3 side: dialogs, OSC lines, the Sequence and the Timecode. The only file that calls MA.
+- `adapter/TrigIT.lua`: the MA3 side: the panel and its loop, dialogs, OSC lines, the Sequence and the Timecode. The only file that calls MA.
+- `docs/`: screenshots of the panel on onPC.
 - `build.lua`: bundles all of these into `dist/` (an MA3 plugin can't `require` files). Run `lua build.lua` after changing them, and commit `dist/`. CI fails if it is out of date.
 - `spec/`: busted tests. `spec/fixtures/*.trigit` are written by the Swift tests (`Tests/TrigITStorageTests/MA3FixtureTests.swift`). After changing those Sets or the file format, run `TRIGIT_WRITE_FIXTURES=1 swift test --filter MA3FixtureTests`.
 
@@ -69,9 +98,10 @@ You need Lua 5.4 (the MA3 runs 5.4.8) and `luarocks install busted`. The adapter
 
 1. Import the plugin (above) in a scratch show, and copy `spec/fixtures/example.trigit` to `gma3_library/trigit/`.
 2. Set up Art-Net Timecode input: Menu > DMX Protocols > Art-Net: Enable Input, an interface, and in the Timecode tab an enabled input on slot 1.
-3. Run the plugin, choose the example, 30 fps, slot 1, and a new OSC line to an address where something listens on port 7000. Check that the summary, the Sequence and the Timecode look as described above.
+3. Run the plugin, tap Import Show, choose the example, 30 fps, slot 1, and a new OSC line to an address where something listens on port 7000. Check that the summary, the Sequence and the Timecode look as described above.
 4. Send Art-Net Timecode from 00:59:58:00 to that machine from any Art-Net timecode generator, and check that `/composition/columns/1/connect 1` arrives at 01:00:00:00.
 5. Import a changed Set and check that the Timecode and Sequence were replaced, not added.
+6. Switch off the Timecode's AutoStart, Load Set the example in the panel, arm it, and send the timecode again: the panel shows the Playhead and Intro, and the message arrives once. With AutoStart on, the status line warns.
 
 ## The plan
 

@@ -47,6 +47,29 @@ local function nextFrame(timecode, rate)
     return ("%02d:%02d:%02d:%02d"):format(h, m, s, f)
 end
 
+-- The MA command for one Action to its Destination ({ name, uses }), and its
+-- release (a later Note Off) if any; or nil and why it can't be sent.
+local function commandFor(action, destination)
+    local transport = TRANSPORT[action.type]
+    if not destination then
+        return nil, "an Action sends to a Destination that isn't in the Set; left out"
+    elseif not destination.uses[transport] then
+        return nil, ('Destination "%s" has %s switched off; Action left out'):format(destination.name, TRANSPORT_NAME[transport])
+    elseif UNSUPPORTED[action.type] then
+        return nil, UNSUPPORTED[action.type] .. " Actions aren't supported by the MA3 plugin yet; left out"
+    end
+    return commands[action.type](action[action.type])
+end
+
+-- A Destination as the plan uses it, from one in a .trigit file.
+local function destinationFrom(d)
+    -- Older files: OSC on, MIDI and DMX on if their output is set (Coding.swift).
+    local uses = { osc = d.usesOSC ~= false, midi = d.usesMIDI, dmx = d.usesDMX }
+    if uses.midi == nil then uses.midi = d.midiOutput ~= nil end
+    if uses.dmx == nil then uses.dmx = d.dmxOutput ~= nil end
+    return { name = d.name or "", uses = uses, host = d.host or "", port = d.port or 0, midiPort = d.midiOutput and d.midiOutput.name }
+end
+
 -- Builds the plan from Songs, each { name, where, hasSpan, start, ["end"],
 -- startNote, stopNote, startActions, stopActions }, whose Actions carry their
 -- resolved Destination (or nil if missing). Same rules for both inputs.
@@ -81,17 +104,7 @@ local function build(songs, destinations, frameRate, warnings)
                 local time = phase == "start" and song.start or nextFrame(song["end"], frameRate)
                 for _, action in ipairs(song[phase .. "Actions"]) do
                     local destination, transport = action.destination, TRANSPORT[action.type]
-                    local command, release
-                    if not destination then
-                        command, release = nil, "an Action sends to a Destination that isn't in the Set; left out"
-                    elseif not destination.uses[transport] then
-                        command, release = nil, ('Destination "%s" has %s switched off; Action left out')
-                            :format(destination.name, TRANSPORT_NAME[transport])
-                    elseif UNSUPPORTED[action.type] then
-                        command, release = nil, UNSUPPORTED[action.type] .. " Actions aren't supported by the MA3 plugin yet; left out"
-                    else
-                        command, release = commands[action.type](action[action.type])
-                    end
+                    local command, release = commandFor(action, destination)
                     if command then
                         local key = transport == "osc" and "osc_line_for" or transport .. "_for"
                         events[#events + 1] = {
@@ -134,10 +147,9 @@ end
 
 -- MARK: .trigit
 
--- Reads a Set file written by SetFile.swift. Returns the plan, or nil and the
--- reason the file can't be read (worded as the Mac app words it).
-function plan.fromTrigit(text, options)
-    local frameRate = checkRate(options)
+-- The "set" of a .trigit file (SetFile.swift), as the Show Engine takes it;
+-- or nil and the reason the file can't be read, worded as the Mac app words it.
+function plan.readSet(text)
     local ok, file = pcall(json.decode, text)
     if not ok then return nil, "The file is not a TrigIT Set (it isn't JSON)." end
     if type(file) ~= "table" or file.format ~= "TrigIT Set" or math.type(file.version) ~= "integer" then
@@ -147,24 +159,31 @@ function plan.fromTrigit(text, options)
         return nil, ("The Set was saved by a newer TrigIT (file version %d); update TrigIT to open it."):format(file.version)
     end
     if type(file.set) ~= "table" then return nil, 'The Set file is damaged: it has no "set".' end
+    return file.set
+end
 
-    local built
-    ok, built = pcall(function()
+-- The command for one Action the Show Engine sends, to its Destination as
+-- the .trigit file has it: as commandFor, OSC with commands.OSC_LINE still in.
+function plan.liveCommand(action, destination)
+    return commandFor(action, destinationFrom(destination))
+end
+
+-- Reads a Set file written by SetFile.swift. Returns the plan, or nil and the
+-- reason the file can't be read (worded as the Mac app words it).
+function plan.fromTrigit(text, options)
+    local frameRate = checkRate(options)
+    local set, reason = plan.readSet(text)
+    if not set then return nil, reason end
+
+    local ok, built = pcall(function()
         local byID, destinations = {}, {}
-        for _, d in ipairs(file.set.destinations or {}) do
-            -- Older files: OSC on, MIDI and DMX on if their output is set (Coding.swift).
-            local uses = { osc = d.usesOSC ~= false, midi = d.usesMIDI, dmx = d.usesDMX }
-            if uses.midi == nil then uses.midi = d.midiOutput ~= nil end
-            if uses.dmx == nil then uses.dmx = d.dmxOutput ~= nil end
-            local destination = {
-                name = d.name or "", uses = uses, host = d.host or "", port = d.port or 0,
-                midiPort = d.midiOutput and d.midiOutput.name,
-            }
+        for _, d in ipairs(set.destinations or {}) do
+            local destination = destinationFrom(d)
             byID[d.id] = destination
             destinations[#destinations + 1] = destination
         end
         local songs = {}
-        for _, s in ipairs(file.set.songs or {}) do
+        for _, s in ipairs(set.songs or {}) do
             local song = {
                 name = s.name or "", where = ('Song "%s"'):format(s.name or ""), hasSpan = s.start ~= nil,
                 startNote = s.startNote, stopNote = s.stopNote, startActions = {}, stopActions = {},

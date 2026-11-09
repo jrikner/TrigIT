@@ -41,4 +41,10 @@ function timecode.fromIndex(index, rate)
     return ("%02d:%02d:%02d:%02d"):format(n // (3600 * fps), (n // (60 * fps)) % 60, (n // fps) % 60, n % fps)
 end
 
+-- The frame showing `seconds` after 00:00:00:00, as the Timecode Show's
+-- timeline and a timecode slot count (ma3.seconds is the inverse).
+function timecode.fromSeconds(seconds, rate)
+    return timecode.fromIndex(math.floor(seconds * timecode.RATES[rate].real + 1e-6), rate)
+end
+
 return timecode
