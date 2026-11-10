@@ -1,0 +1,3 @@
+# grandMA3 export fixtures are compared byte for byte; keep their LF line
+# endings on Windows checkouts too.
+Tests/TrigITStorageTests/Fixtures/ma3/*.xml -text
