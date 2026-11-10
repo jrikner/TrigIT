@@ -37,6 +37,13 @@ describe("ma3.cues", function()
         }, ma3.cues(result, { Resolume = 3 }))
     end)
 
+    it("releases a DMX pulse in its own cue after the pulse's duration", function()
+        local result = plan.fromCSV("A,00:00:01:00,00:00:02:00,Lights,dmx,0.7,128")
+        assert.same({ { seconds = 1, name = "A start", command = "DMXUniverse 1.7 At Decimal8 128" },
+                      { seconds = 1.5, name = "A DMX release", command = "Off DMXUniverse 1.7" } },
+            ma3.cues(result, {}))
+    end)
+
     it("leaves out OSC events for Destinations with no line", function()
         local result = plan.fromCSV("A,00:00:01:00,00:00:02:00,Resolume,osc,/a\n,,,MA3,midi-note,60")
         assert.same({ { seconds = 1, name = "A start", command = 'SendMIDI "Note" 1/60 127' },

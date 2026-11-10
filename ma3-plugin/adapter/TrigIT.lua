@@ -596,7 +596,7 @@ local function addActionDialog(songID)
         local result, selectors = ask("add Action",
             "OSC: an address such as /composition/columns/1/connect, and arguments such as 1 or \"text\".\n"
             .. "MIDI note: 60, or channel/note such as 10/36, and a velocity (127 if empty).\n"
-            .. "DMX pulse: universe.channel such as 1.1, and a value (255 if empty). The Mac app sends it; the console can't yet.",
+            .. "DMX pulse: universe.channel such as 1.1, and a value (255 if empty), held 0.5 s. The universe is Art-Net's, as in the Mac app: 0.1 is the console's DMX universe 1.",
             fields, { { value = 1, name = "Add" }, { value = 0, name = "Cancel" } },
             { { name = "Kind", type = 1, values = { OSC = 1, ["MIDI note"] = 2, DMX = 3 }, selectedValue = kind },
               { name = "When", type = 1, values = { Start = 1, Stop = 2 }, selectedValue = when } })

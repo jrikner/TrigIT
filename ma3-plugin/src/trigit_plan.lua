@@ -12,9 +12,11 @@ local plan = {}
 local FRAMES = { ["24"] = 24, ["25"] = 25, ["29.97 DF"] = 30, ["30"] = 30 }
 local TRANSPORT = { osc = "osc", midiNote = "midi", msc = "midi", dmxPulse = "dmx" }
 local TRANSPORT_NAME = { osc = "OSC", midi = "MIDI", dmx = "DMX" }
--- MA3 has no checked way to send these yet: MSC from a command, or a DMX
--- pulse to a channel without taking it from the console's own output.
-local UNSUPPORTED = { msc = "MIDI Show Control", dmxPulse = "DMX pulse" }
+-- grandMA3 2.5 can't send these: SendMIDI only sends notes, control and
+-- program changes, never SysEx, and no command or Lua function sends MSC.
+local UNSUPPORTED = {
+    msc = "MIDI Show Control Actions can't be sent from grandMA3 (SendMIDI has no SysEx); left out",
+}
 
 local function trim(text) return (text:gsub("^%s+", ""):gsub("%s+$", "")) end
 
@@ -48,7 +50,7 @@ local function nextFrame(timecode, rate)
 end
 
 -- The MA command for one Action to its Destination ({ name, uses }), and its
--- release (a later Note Off) if any; or nil and why it can't be sent.
+-- release (a later Note Off or DMX release) if any; or nil and why it can't be sent.
 local function commandFor(action, destination)
     local transport = TRANSPORT[action.type]
     if not destination then
@@ -56,9 +58,9 @@ local function commandFor(action, destination)
     elseif not destination.uses[transport] then
         return nil, ('Destination "%s" has %s switched off; Action left out'):format(destination.name, TRANSPORT_NAME[transport])
     elseif UNSUPPORTED[action.type] then
-        return nil, UNSUPPORTED[action.type] .. " Actions aren't supported by the MA3 plugin yet; left out"
+        return nil, UNSUPPORTED[action.type]
     end
-    return commands[action.type](action[action.type])
+    return commands[action.type](action[action.type], destination.dmxOutput)
 end
 
 -- A Destination as the plan uses it, from one in a .trigit file.
@@ -67,7 +69,10 @@ local function destinationFrom(d)
     local uses = { osc = d.usesOSC ~= false, midi = d.usesMIDI, dmx = d.usesDMX }
     if uses.midi == nil then uses.midi = d.midiOutput ~= nil end
     if uses.dmx == nil then uses.dmx = d.dmxOutput ~= nil end
-    return { name = d.name or "", uses = uses, host = d.host or "", port = d.port or 0, midiPort = d.midiOutput and d.midiOutput.name }
+    return {
+        name = d.name or "", uses = uses, host = d.host or "", port = d.port or 0,
+        midiPort = d.midiOutput and d.midiOutput.name, dmxOutput = d.dmxOutput,
+    }
 end
 
 -- Builds the plan from Songs, each { name, where, hasSpan, start, ["end"],

@@ -19,6 +19,7 @@ local function set()
                 { id = "a", destination = "100", type = "osc", osc = { address = "/go", arguments = { { int = 1 } } } },
                 { id = "b", destination = "200", type = "midiNote", midiNote = { channel = 0, note = 60, velocity = 100 } },
                 { id = "c", destination = "300", type = "dmxPulse", dmxPulse = { universe = 1, channel = 1, value = 255 } },
+                { id = "d", destination = "200", type = "msc", msc = { command = "go", cue = "5" } },
             },
             stopActions = {},
         } },
@@ -46,18 +47,23 @@ describe("the Show Engine on the console", function()
     it("sends a Song's Actions when armed and the Playhead enters it", function()
         local show = live.new(set(), "25", function(d) return d.name == "Resolume" and 7 or nil end, true)
         play(show, "00:59:59:20", 7, 1000)
-        assert.same({ 'SendOSC 7 "/go,i,1"', 'SendMIDI "Note" 1/60 100' }, show:take())
-        assert.same({ 'Intro: DMX pulse to Lights not sent: DMX pulse Actions aren\'t supported by the MA3 plugin yet; left out',
-            "Intro: note 1/60 to Synth", "Intro: OSC /go to Resolume", "Intro entered" }, texts(show))
+        assert.same({ 'SendOSC 7 "/go,i,1"', 'SendMIDI "Note" 1/60 100', "DMXUniverse 2.1 At Decimal8 255" }, show:take())
+        assert.same({ "Intro: MSC to Synth not sent: MIDI Show Control Actions can't be sent from grandMA3 (SendMIDI has no SysEx); left out",
+            "Intro: DMX pulse 1.1 to Lights", "Intro: note 1/60 to Synth", "Intro: OSC /go to Resolume", "Intro entered" },
+            texts(show))
         assert.is_true(show.log[1].failed)
     end)
 
-    it("ends the MIDI note after the note length", function()
+    it("ends the MIDI note after the note length, and the DMX pulse after its duration", function()
         local show = live.new(set(), "25", function() return 7 end, true)
         local now = play(show, "00:59:59:20", 7, 1000)
         show:take()
         show:tick(now + 0.2)
         assert.same({ 'SendMIDI "Note" 1/60 0' }, show:take())
+        show:tick(now + 0.4)
+        assert.same({}, show:take())
+        show:tick(now + 0.5)
+        assert.same({ "Off DMXUniverse 2.1" }, show:take())
     end)
 
     it("sends nothing while disarmed", function()
@@ -70,16 +76,16 @@ describe("the Show Engine on the console", function()
     it("reports an OSC Destination with no line instead of sending", function()
         local show = live.new(set(), "25", function() return nil end, true)
         play(show, "00:59:59:20", 7, 1000)
-        assert.same({ 'SendMIDI "Note" 1/60 100' }, show:take())
+        assert.same({ 'SendMIDI "Note" 1/60 100', "DMXUniverse 2.1 At Decimal8 255" }, show:take())
         assert.same('Intro: OSC /go to Resolume not sent: no OSC line for "Resolume": import the Set, or name a line "TrigIT Resolume"',
-            texts(show)[3])
+            texts(show)[4])
     end)
 
     it("fires by hand even while disarmed", function()
         local show = live.new(set(), "25", function() return 7 end, false)
         show:fire("1", 1000)
-        assert.same({ 'SendOSC 7 "/go,i,1"', 'SendMIDI "Note" 1/60 100' }, show:take())
-        assert.same("Intro fired by hand", texts(show)[4])
+        assert.same({ 'SendOSC 7 "/go,i,1"', 'SendMIDI "Note" 1/60 100', "DMXUniverse 2.1 At Decimal8 255" }, show:take())
+        assert.same("Intro fired by hand", texts(show)[5])
     end)
 
     it("logs the Stop when the slot stops moving, and keeps only the newest entries", function()

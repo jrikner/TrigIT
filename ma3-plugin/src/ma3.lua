@@ -23,7 +23,8 @@ end
 
 -- The cues for a plan, in time order: { seconds, name, command }. Events at
 -- the same moment share a cue, their commands joined with "; " in plan order.
--- A release (a MIDI Note Off) becomes its own moment `after` seconds later.
+-- A release (a MIDI Note Off, a DMX release) becomes its own moment `after`
+-- seconds later.
 -- `lines` maps a Destination's name to its In & Out OSC line number; events
 -- for an OSC Destination without one are left out.
 function ma3.cues(plan, lines)
@@ -45,7 +46,9 @@ function ma3.cues(plan, lines)
         if line or not event.destination.osc_line_for then
             local seconds = ma3.seconds(event.time, plan.frameRate)
             add(seconds, event.song .. " " .. event.phase, command)
-            if event.release then add(seconds + event.release.after, event.song .. " note off", event.release.command) end
+            if event.release then
+                add(seconds + event.release.after, event.song .. " " .. event.release.name, event.release.command)
+            end
         end
     end
 

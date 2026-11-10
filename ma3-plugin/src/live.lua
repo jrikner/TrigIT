@@ -30,7 +30,7 @@ local function describe(action)
     if action.type == "osc" then return "OSC " .. tostring(body.address) end
     if action.type == "midiNote" then return ("note %s/%s"):format(tostring((body.channel or 0) + 1), tostring(body.note)) end
     if action.type == "msc" then return "MSC" end
-    return "DMX pulse"
+    return ("DMX pulse %s.%s"):format(tostring(body.universe), tostring(body.channel))
 end
 
 function Live:note(text, failed)

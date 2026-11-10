@@ -191,7 +191,31 @@ end
 -- after NOTE_LENGTH. MA3 sends it on the console's MIDI output.
 function commands.midiNote(note)
     local function send(velocity) return ('SendMIDI "Note" %d/%d %d'):format(note.channel + 1, note.note, velocity) end
-    return send(note.velocity), { after = commands.NOTE_LENGTH, command = send(0) }
+    return send(note.velocity), { after = commands.NOTE_LENGTH, command = send(0), name = "note off" }
+end
+
+-- The console's DMX universes (LivePatch.DmxUniverses on onPC 2.5.1).
+commands.UNIVERSES = 1024
+
+-- DMXUniverse <universe>.<channel> At Decimal8 <value>: MA3's DMX tester puts
+-- the exact 8-bit value on the console's own output for that channel, over
+-- whatever the show outputs there. Off DMXUniverse <universe>.<channel>,
+-- `duration` seconds later, releases it: the channel goes back to the show's
+-- value (0 when nothing is patched), where the Mac app sends 0.
+-- The Mac app's universe is an Art-Net port-address (0-based) or an sACN
+-- universe (1-based); MA3's universes are 1-based, and its Art-Net and sACN
+-- lines map universe 1 to Art-Net 0 and sACN 1 unless changed. So Art-Net
+-- universe u is MA3 universe u + 1. `protocol` is the Destination's dmxOutput.
+function commands.dmxPulse(pulse, protocol)
+    local sACN = tostring(protocol):find("^sACN") ~= nil
+    local universe = pulse.universe + (sACN and 0 or 1)
+    if universe < 1 or universe > commands.UNIVERSES then
+        return nil, ("%s universe %d would be MA3 universe %d; the console has 1-%d"):format(
+            sACN and "sACN" or "Art-Net", pulse.universe, universe, commands.UNIVERSES)
+    end
+    local address = ("DMXUniverse %d.%d"):format(universe, pulse.channel)
+    return ("%s At Decimal8 %d"):format(address, pulse.value),
+        { after = pulse.duration or 0.5, command = "Off " .. address, name = "DMX release" }
 end
 
 return commands
@@ -213,9 +237,11 @@ local plan = {}
 local FRAMES = { ["24"] = 24, ["25"] = 25, ["29.97 DF"] = 30, ["30"] = 30 }
 local TRANSPORT = { osc = "osc", midiNote = "midi", msc = "midi", dmxPulse = "dmx" }
 local TRANSPORT_NAME = { osc = "OSC", midi = "MIDI", dmx = "DMX" }
--- MA3 has no checked way to send these yet: MSC from a command, or a DMX
--- pulse to a channel without taking it from the console's own output.
-local UNSUPPORTED = { msc = "MIDI Show Control", dmxPulse = "DMX pulse" }
+-- grandMA3 2.5 can't send these: SendMIDI only sends notes, control and
+-- program changes, never SysEx, and no command or Lua function sends MSC.
+local UNSUPPORTED = {
+    msc = "MIDI Show Control Actions can't be sent from grandMA3 (SendMIDI has no SysEx); left out",
+}
 
 local function trim(text) return (text:gsub("^%s+", ""):gsub("%s+$", "")) end
 
@@ -249,7 +275,7 @@ local function nextFrame(timecode, rate)
 end
 
 -- The MA command for one Action to its Destination ({ name, uses }), and its
--- release (a later Note Off) if any; or nil and why it can't be sent.
+-- release (a later Note Off or DMX release) if any; or nil and why it can't be sent.
 local function commandFor(action, destination)
     local transport = TRANSPORT[action.type]
     if not destination then
@@ -257,9 +283,9 @@ local function commandFor(action, destination)
     elseif not destination.uses[transport] then
         return nil, ('Destination "%s" has %s switched off; Action left out'):format(destination.name, TRANSPORT_NAME[transport])
     elseif UNSUPPORTED[action.type] then
-        return nil, UNSUPPORTED[action.type] .. " Actions aren't supported by the MA3 plugin yet; left out"
+        return nil, UNSUPPORTED[action.type]
     end
-    return commands[action.type](action[action.type])
+    return commands[action.type](action[action.type], destination.dmxOutput)
 end
 
 -- A Destination as the plan uses it, from one in a .trigit file.
@@ -268,7 +294,10 @@ local function destinationFrom(d)
     local uses = { osc = d.usesOSC ~= false, midi = d.usesMIDI, dmx = d.usesDMX }
     if uses.midi == nil then uses.midi = d.midiOutput ~= nil end
     if uses.dmx == nil then uses.dmx = d.dmxOutput ~= nil end
-    return { name = d.name or "", uses = uses, host = d.host or "", port = d.port or 0, midiPort = d.midiOutput and d.midiOutput.name }
+    return {
+        name = d.name or "", uses = uses, host = d.host or "", port = d.port or 0,
+        midiPort = d.midiOutput and d.midiOutput.name, dmxOutput = d.dmxOutput,
+    }
 end
 
 -- Builds the plan from Songs, each { name, where, hasSpan, start, ["end"],
@@ -665,7 +694,8 @@ end
 
 -- The cues for a plan, in time order: { seconds, name, command }. Events at
 -- the same moment share a cue, their commands joined with "; " in plan order.
--- A release (a MIDI Note Off) becomes its own moment `after` seconds later.
+-- A release (a MIDI Note Off, a DMX release) becomes its own moment `after`
+-- seconds later.
 -- `lines` maps a Destination's name to its In & Out OSC line number; events
 -- for an OSC Destination without one are left out.
 function ma3.cues(plan, lines)
@@ -687,7 +717,9 @@ function ma3.cues(plan, lines)
         if line or not event.destination.osc_line_for then
             local seconds = ma3.seconds(event.time, plan.frameRate)
             add(seconds, event.song .. " " .. event.phase, command)
-            if event.release then add(seconds + event.release.after, event.song .. " note off", event.release.command) end
+            if event.release then
+                add(seconds + event.release.after, event.song .. " " .. event.release.name, event.release.command)
+            end
         end
     end
 
@@ -1105,7 +1137,7 @@ local function describe(action)
     if action.type == "osc" then return "OSC " .. tostring(body.address) end
     if action.type == "midiNote" then return ("note %s/%s"):format(tostring((body.channel or 0) + 1), tostring(body.note)) end
     if action.type == "msc" then return "MSC" end
-    return "DMX pulse"
+    return ("DMX pulse %s.%s"):format(tostring(body.universe), tostring(body.channel))
 end
 
 function Live:note(text, failed)
@@ -1416,7 +1448,8 @@ function edit.addAction(set, songID, destination, kind, target, value, when)
     local action = { id = edit.newID(), destination = d.id, type = parsed.type }
     action[parsed.type] = parsed[parsed.type]
     if parsed.type == "midiNote" then d.usesMIDI = true end
-    if parsed.type == "dmxPulse" then d.usesDMX = true end
+    -- As the Mac app's usesDMX switch: on, with Art-Net if no output is chosen.
+    if parsed.type == "dmxPulse" then d.usesDMX, d.dmxOutput = true, d.dmxOutput or "artNet" end
     local list = parsed.phase == "stop" and "stopActions" or "startActions"
     song[list] = song[list] or {}
     table.insert(song[list], action)
@@ -2089,7 +2122,7 @@ local function addActionDialog(songID)
         local result, selectors = ask("add Action",
             "OSC: an address such as /composition/columns/1/connect, and arguments such as 1 or \"text\".\n"
             .. "MIDI note: 60, or channel/note such as 10/36, and a velocity (127 if empty).\n"
-            .. "DMX pulse: universe.channel such as 1.1, and a value (255 if empty). The Mac app sends it; the console can't yet.",
+            .. "DMX pulse: universe.channel such as 1.1, and a value (255 if empty), held 0.5 s. The universe is Art-Net's, as in the Mac app: 0.1 is the console's DMX universe 1.",
             fields, { { value = 1, name = "Add" }, { value = 0, name = "Cancel" } },
             { { name = "Kind", type = 1, values = { OSC = 1, ["MIDI note"] = 2, DMX = 3 }, selectedValue = kind },
               { name = "When", type = 1, values = { Start = 1, Stop = 2 }, selectedValue = when } })

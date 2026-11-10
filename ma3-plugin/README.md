@@ -2,7 +2,7 @@
 
 A grandMA3 plugin that runs a TrigIT Set on the console, in one of two modes (`docs/adr/0003-ma3-plugin-modes.md`):
 
-- **Standalone** (#47): its panel loads a Set (a `.trigit` file), follows a timecode slot with TrigIT's Show Engine, and sends the Set's OSC and MIDI Actions while Armed.
+- **Standalone** (#47): its panel loads a Set (a `.trigit` file), follows a timecode slot with TrigIT's Show Engine, and sends the Set's OSC, MIDI note and DMX pulse Actions while Armed.
 - **Bridge** (#46): it sends the timecode slot to the TrigIT Mac app as Art-Net Timecode, and the Mac app fires.
 
 It can also import a Set (`.trigit` or CSV) as a Timecode Show, so MA's own timecode engine fires the Actions without the plugin running (#30).
@@ -94,7 +94,7 @@ It is not frame-accurate: MA updates a slot about 24 times a second, so the Mac 
 
 On **Import** it writes:
 
-- **Sequence** `TrigIT <Set>`: one cue per moment, named after its Song (`Intro start`, `Intro stop`, `Intro note off`). Each cue's Command holds that moment's Actions, joined with `;`.
+- **Sequence** `TrigIT <Set>`: one cue per moment, named after its Song (`Intro start`, `Intro stop`, `Intro note off`, `Intro DMX release`). Each cue's Command holds that moment's Actions, joined with `;`.
 - **Timecode** `TrigIT <Set>`: one track playing that sequence, with a `Goto` event per cue at its time. It follows the chosen slot, and starts and stops by itself when timecode arrives and stops (Auto Start, Auto Stop).
 - **OSC lines** in In & Out, when you asked for new ones: Send Command on, Send off. Without Send Command, MA3 refuses `SendOSC`. With Send on, MA3 would also send its own playback feedback to the device.
 
@@ -117,6 +117,8 @@ OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose 
 - `SendOSC` sends the same bytes as the Mac app for int, float and string arguments, UTF-8, `;` inside strings, and messages with no arguments (`"/address,"`). MA3 refuses a bare `"/address"`.
 - The example Set, imported with Art-Net Timecode on slot 1, fires Resolume's `/composition/columns/1/connect 1` 25–58 ms after 01:00:00:00 arrives at 30 fps, over 4 runs, and a 4-cue Set fires each cue 52–59 ms after its frame at 25 fps. That is one to two frames, from MA3's own timecode handling.
 - Importing a second Set replaces the first: one Timecode, one Sequence, and the same OSC line.
+- DMX pulses (#102), read back from MA3's DMX tester (`PatchInfo[channel].test_value` of `LivePatch.DmxUniverses`): `DMXUniverse 1.12 At Decimal8 200` sets exactly 200 (also 0, 1, 128 and 255), and `Off DMXUniverse 1.12` releases it. Fired from the panel (`fire`), a 0.5 s pulse was released 0.49 s after it was set and a 1 s pulse 0.98 s after. Written as a Timecode Show by the importer's own code and played through 01:00:00:00, the pulses started at 01:00:00:01 (the first sample) and were released 0.50 s and 1.00 s later; a Stop pulse of 0.25 s at 01:00:05:01 lasted 0.28 s. Times were sampled inside MA every frame or so (about 30 ms). Not checked on the wire: onPC with no MA hardware outputs no DMX, so no Art-Net or sACN packet arrived at a listener on this Mac with Art-Net or sACN output switched on. The Timecode Show was played from its own clock: Art-Net Timecode sent to 127.0.0.1 went to another app on port 6454, not to MA.
+- MIDI Show Control (#102): `SendMIDI` answers "Illegal value" for any type but `"Note"`, `"Control"` and `"Program"` (tried `"SysEx"`, `"Sysex"`, `"MSC"`, `"Raw"`), and `SendMSC` doesn't exist. The MA3 Lua globals have no MIDI or SysEx function. With MIDI Out set to an IAC bus, `SendMIDI "Note" 1/60 100` arrived as `90 3C 64` and `"Control" 1/8 64` as `B0 08 40`.
 - Timecode events targeting a **macro** never ran in onPC 2.5.1, so the plugin targets a sequence and puts the commands in cue Commands.
 
 ## Differences from the Mac app
@@ -125,7 +127,13 @@ The panel runs the Mac app's Show Engine, with the same rules. It follows one sl
 
 - **Jumps:** starting timecode in the middle of a Song doesn't fire its Start Actions. The Mac app does, because a Jump landing inside a Song Enters it. MA3 only fires events the playhead passes.
 - **Stops:** MA3 runs on for its slot's afterroll (0.5 s by default) when timecode stops, so a Stop cue within that time still fires.
-- **Not sent:** MIDI Show Control and DMX pulse Actions, Songs with only Start or Stop Notes, and OSC strings containing `,` or `"`. Each is listed as a warning.
+- **Not sent:** MIDI Show Control Actions, Songs with only Start or Stop Notes, and OSC strings containing `,` or `"`. Each is listed as a warning.
+- **MIDI Show Control can't be sent from grandMA3 2.5.** MSC is SysEx (`F0 7F <device> 02 <format> <command> <data> F7`), and `SendMIDI` only sends notes, control changes and program changes; no other command or Lua function sends MIDI. MA3's own MSC output (In & Out > MSC) only reports its own executors' Go, Pause and so on, with one device ID and command format for the whole show, so it can't send an Action's GO for any cue and list. Send MSC from the Mac app, or use an OSC or MIDI note Action instead.
+- **DMX pulses** go out on the console's own DMX output, with MA3's DMX tester: `DMXUniverse <u>.<channel> At Decimal8 <value>`, then `Off DMXUniverse <u>.<channel>` after the pulse's duration. So:
+  - They go wherever the console outputs that universe (its DMX ports, Art-Net or sACN lines), not to the Destination's DMX address. onPC needs MA hardware to output DMX at all.
+  - The universe is the Mac app's: an Art-Net port-address for an Art-Net Destination (and for CSV `dmx` rows), an sACN universe for sACN. MA3 counts universes from 1 and by default puts its universe 1 on Art-Net 0 and sACN 1, so Art-Net universe `u` is MA3 universe `u + 1` and sACN universe `u` is MA3 universe `u`. If the console maps its Art-Net or sACN lines differently, the pulse lands where that mapping sends MA3 universe `u + 1` (or `u`). Universes past the console's 1024 are left out with a warning.
+  - The tester overrides whatever the show outputs on that channel while the pulse lasts. At the end the channel goes back to the show's value (0 if nothing is patched there), where the Mac app sends 0.
+  - Two pulses on one channel at once: the later one sets its value and the first one's release ends both. The Mac app holds the higher value until the last pulse ends.
 - **MIDI** goes out of the console's MIDI output, whichever Destination it names. A note is held 0.1 s, as in the Mac app.
 - **Drop-frame:** at 29.97 DF, times are counted in real seconds (frames × 1001/30000). This is not checked against MA3's own DF handling yet.
 
@@ -187,7 +195,7 @@ local plan = require("trigit_plan").fromTrigit(text, { frameRate = "25" })
 
 - `kind` lists the Destination's switched-on transports, joined with `+` (`osc+midi+dmx`). A CSV Set has no addresses, so `host`, `port` and `midiPort` are nil.
 - Destinations stay symbolic. `ma3.cues` replaces `$line` with the Destination's OSC line.
-- `release` is a second command to send `after` seconds later: the Note Off for a MIDI note.
+- `release` is a second command to send `after` seconds later, with the `name` its cue gets: the Note Off for a MIDI note (`"note off"`), the tester's `Off` for a DMX pulse (`"DMX release"`).
 - Events are in timecode order. Actions keep their Set order within one time.
 
 ## Rules (as in the Mac app and `GLOSSARY.md`)
@@ -197,7 +205,7 @@ local plan = require("trigit_plan").fromTrigit(text, { frameRate = "25" })
 - A Song with no timecode span (only a Start Note or Stop Note) can't become timecode events. It is skipped with a warning.
 - Songs whose spans overlap an earlier Song are refused, with `line N: overlaps "Name"` for CSV, as the app's CSV import says it. Spans include both ends.
 - A Song whose times use frames the frame rate doesn't have, such as `:27` at 25 fps, gets a warning.
-- Actions are left out with a warning when their Destination is missing, has that transport switched off, or is of a kind MA3 can't send yet (above).
+- Actions are left out with a warning when their Destination is missing, has that transport switched off, or is of a kind MA3 can't send (MIDI Show Control, above), and DMX pulses on a universe past the console's 1024.
 
 ## CSV format
 
@@ -209,8 +217,8 @@ This extends the CSV the Mac app imports (Set > Import Songs from CSV). One row 
 | 2 | start | `hh:mm:ss:ff`. `;` or `.` before the frames also works. Frames 0–29. |
 | 3 | end | `hh:mm:ss:ff`, not before start. Both ends are part of the Song. |
 | 4 | destination | The Destination's name, such as `Resolume`. Each name used becomes a Destination. |
-| 5 | kind | `osc`, `midi-note` or `dmx` (any case). The MA3 plugin doesn't send `dmx` yet. |
-| 6 | address | `osc`: the OSC address (`/composition/columns/1/connect`). `midi-note`: the note `60` (channel 1) or `channel/note` (`10/36`, channels 1–16). `dmx`: `universe.channel` (`2.101`, channel 1–512). |
+| 5 | kind | `osc`, `midi-note` or `dmx` (any case). |
+| 6 | address | `osc`: the OSC address (`/composition/columns/1/connect`). `midi-note`: the note `60` (channel 1) or `channel/note` (`10/36`, channels 1–16). `dmx`: `universe.channel` (`2.101`, channel 1–512), the universe an Art-Net port-address as in the Mac app (MA3 universe 3 for `2.101`). |
 | 7 | args / value | `osc`: arguments as typed in the app's editor. Whole numbers are ints, numbers with a `.` or `e` are floats, anything else is a string, and `"two words"` keeps spaces. `midi-note`: velocity 1–127 (default 127). `dmx`: value 0–255 (default 255), held 0.5 s. |
 | 8 | when | `start` (default) or `stop`: a Start Action or a Stop Action. |
 
