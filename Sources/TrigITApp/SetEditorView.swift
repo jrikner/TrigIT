@@ -581,7 +581,10 @@ struct ActionRow: View {
                     case .osc(let message): OSCActionFields(message: message) { update(.osc($0)) }
                     case .midiNote(let note): MIDINoteFields(note: note) { update(.midiNote($0)) }
                     case .msc(let command): MSCFields(command: command) { update(.msc($0)) }
-                    case .dmxPulse(let pulse): DMXPulseFields(pulse: pulse) { update(.dmxPulse($0)) }
+                    case .dmxPulse(let pulse):
+                        DMXPulseFields(pulse: pulse, universes: universes) {
+                            update(.dmxPulse($0))
+                        }
                     }
                 }
                 .font(.system(size: 15))
@@ -642,6 +645,12 @@ struct ActionRow: View {
             return output.universeRange.contains(pulse.universe)
                 ? nil : "Universe \(pulse.universe) is outside \(output.name)'s range \(output.universeRange.lowerBound) to \(output.universeRange.upperBound)"
         }
+    }
+
+    /// What the Destination's DMX protocol can address; either, with DMX off.
+    private var universes: ClosedRange<Int> {
+        model.set.destination(action.destinationID)?.activeDMXOutput?.universeRange
+            ?? ArtDmxPacket.portAddressRange.lowerBound...SACNDataPacket.universeRange.upperBound
     }
 
     private func update(_ message: Action.Message) {
@@ -997,14 +1006,21 @@ struct MSCFields: View {
 
 struct DMXPulseFields: View {
     let pulse: DMXPulse
+    /// The universes the Destination's DMX protocol can address.
+    let universes: ClosedRange<Int>
     let onChange: (DMXPulse) -> Void
 
     var body: some View {
         Text("Univ").foregroundColor(.secondary)
-        NumberField("Universe", value: pulse.universe, range: 0...63_999, width: 52) { universe in
+        NumberField("Universe", value: pulse.universe, range: universes, width: 52) { universe in
             onChange(DMXPulse(universe: universe, channel: pulse.channel, value: pulse.value, duration: pulse.duration))
         }
-        .help("Art-Net: port-address 0-32767. sACN: universe 1-63999.")
+        .help("Universe \(universes.lowerBound)-\(universes.upperBound)")
+        Stepper("Step universe", value: Binding(
+            get: { pulse.universe },
+            set: { onChange(DMXPulse(universe: $0, channel: pulse.channel, value: pulse.value, duration: pulse.duration)) }
+        ), in: universes)
+        .labelsHidden()
         Text("Ch").foregroundColor(.secondary)
         NumberField("DMX channel", value: pulse.channel, range: 1...512, width: 40) { channel in
             onChange(DMXPulse(universe: pulse.universe, channel: channel, value: pulse.value, duration: pulse.duration))
