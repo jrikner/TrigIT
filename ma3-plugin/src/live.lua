@@ -118,4 +118,20 @@ function Live:take()
     return out
 end
 
+-- Bridge mode: which slot's frames go to the Mac. An engine with no Set
+-- decides, so the Backup takes over and hands back as on the Mac app: once the
+-- Primary is lost, and back only after both stop.
+local Source = {}
+Source.__index = Source
+
+function live.source(rate) return setmetatable({ engine = engine.new(), rate = rate }, Source) end
+
+-- True if this reading, as for Live:follow, is from the slot to send.
+function Source:feed(seconds, now, role)
+    self.engine:handle({ timecode = timecode.fromSeconds(seconds, self.rate), frameRate = self.rate, timestamp = now }, role)
+    return role == self.engine.liveSource
+end
+
+function Source:tick(now) self.engine:tick(now) end
+
 return live

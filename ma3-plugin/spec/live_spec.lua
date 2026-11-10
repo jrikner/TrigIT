@@ -145,6 +145,40 @@ describe("a Backup slot", function()
     end)
 end)
 
+describe("the slot bridge mode sends", function()
+    local function run(source, from, to, roles)
+        local sent = {}
+        for i = 0, math.floor((to - from) * 25 + 0.5) - 1 do
+            local now = from + i / 25
+            source:tick(now)
+            for _, role in ipairs(roles) do
+                if source:feed(3600 + now, now, role) then sent[#sent + 1] = role end
+            end
+        end
+        return sent
+    end
+
+    it("is the primary while it runs, the backup once it is lost, and the backup while both run again", function()
+        local source = live.source("25")
+        local sent = run(source, 0, 1, { "primary", "backup" })
+        assert.are.same({ "primary" }, { sent[1] })
+        assert.is_falsy(table.concat(sent, " "):find("backup"))
+        sent = run(source, 1, 2, { "backup" }) -- the primary stops
+        assert.are.equal("backup", sent[#sent])
+        assert.is_true(#sent >= 15) -- after up to SOURCE_LOSS_TIME
+        sent = run(source, 2, 3, { "primary", "backup" }) -- a flaky primary comes back
+        assert.is_falsy(table.concat(sent, " "):find("primary"))
+    end)
+
+    it("is the primary again after timecode stops", function()
+        local source = live.source("25")
+        run(source, 0, 1, { "primary", "backup" })
+        run(source, 1, 2, { "backup" })
+        source:tick(10)
+        assert.are.same({ "primary" }, { run(source, 20, 20.04, { "primary", "backup" })[1] })
+    end)
+end)
+
 describe("slot seconds as timecode", function()
     it("reads back every frame the Timecode Show writes, at each rate", function()
         for _, rate in ipairs({ "24", "25", "29.97 DF", "30" }) do

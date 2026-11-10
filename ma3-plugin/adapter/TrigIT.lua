@@ -431,6 +431,7 @@ local state = { pending = nil, notice = "", lastTime = {} }
 
 local function follow()
     state.lastTime, state.lastMove = {}, nil
+    state.source, state.bridgeRole, state.sent, state.frames = live.source(state.rate), nil, nil, nil
     state.show = state.set and live.new(state.set, state.rate, lineFor, false)
 end
 
@@ -775,11 +776,14 @@ local function bridge(seconds)
             state.bridgeProblem = "LuaSocket is not available on this station, so bridge mode can't send"
             return
         end
-        state.udp = socket.udp()
-        state.udp:setoption("broadcast", true)
+        -- LuaSocket 3.0's udp() has no address family until first use, so the
+        -- broadcast option fails on it and a broadcast address is refused.
+        state.udp = socket.udp4 and socket.udp4() or socket.udp()
+        local ok, problem = state.udp:setoption("broadcast", true)
+        state.broadcastProblem = not ok and (" (and the broadcast option failed: %s)"):format(tostring(problem)) or ""
     end
     local ok, problem = state.udp:sendto(artnet.timecode(position, state.rate), state.bridgeTo, artnet.PORT)
-    state.bridgeProblem = not ok and ("Can't send to %s: %s"):format(state.bridgeTo, tostring(problem)) or nil
+    state.bridgeProblem = not ok and ("Can't send to %s: %s%s"):format(state.bridgeTo, tostring(problem), state.broadcastProblem) or nil
     if ok then state.frames = (state.frames or 0) + 1 end
 end
 
@@ -1011,7 +1015,8 @@ local function render(ui, now)
     put(ui.compact.arm, "BackColor", armed and RED or "Button.Background")
 
     local running = state.lastMove and now - state.lastMove < 0.5
-    local first = state.mode == "Bridge" and ("Bridge to %s, %d frames sent"):format(state.bridgeTo, state.frames or 0)
+    local first = state.mode == "Bridge" and ("Bridge to %s, %d frames sent%s"):format(state.bridgeTo, state.frames or 0,
+        running and state.bridgeRole == "backup" and ", from the Backup slot" or "")
         or state.file and state.file.name .. (state.locked and "  (Show Lock)" or "") or "No Set: Set > Load Set or New Set"
     local status = ("%s   |   slot %d%s at %s fps, %s"):format(first, state.slot,
         state.backup and (" (backup %d)"):format(state.backup) or "", state.rate,
@@ -1149,6 +1154,7 @@ local function main(_, text)
     state.mode, state.bridgeTo = setting("Mode") or "Standalone", setting("BridgeTo")
     local backup = tonumber(setting("BackupSlot"))
     state.backup = backup ~= 0 and backup ~= state.slot and backup or nil
+    follow() -- bridge mode's source, even with no Set
     local path, name = setting("SetPath"), setting("SetName")
     if path and name then load({ path = path, name = name }, true) end
 
@@ -1187,12 +1193,16 @@ local function main(_, text)
             if time and time ~= last then
                 if last then
                     if show then show:follow(time / SLOT_UNITS, now, role) end
-                    if role == "primary" and state.mode == "Bridge" then bridge(time / SLOT_UNITS) end
+                    if state.mode == "Bridge" and state.source:feed(time / SLOT_UNITS, now, role) then
+                        state.bridgeRole = role
+                        bridge(time / SLOT_UNITS)
+                    end
                     state.lastMove = now
                 end
                 state.lastTime[role] = time
             end
         end
+        state.source:tick(now)
         if show then
             show:tick(now)
             for _, command in ipairs(show:take()) do
