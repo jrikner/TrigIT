@@ -24,14 +24,14 @@ Run the plugin (tap it, or type `Plugin <n>`). It opens the TrigIT panel:
 ![The TrigIT panel on onPC, following timecode](docs/panel-running.png)
 
 - **Top:** the Playhead (the timecode on the slot, grey while timecode is lost), the current Song with how far into it you are (`0:02 of 4:00`), the next Song and when it starts (`DJ Pull-up starts in 59:58`), and **Armed**. Tap Armed to arm or disarm; it turns red when armed. The panel opens disarmed.
-- **Status line:** the Set, the slot and frame rate it follows, and whether timecode is running. It becomes a red banner for an alert: timecode lost, a CSV Set (which can only be imported), or an imported Timecode Show on the same slot that would fire the same Actions a second time:
+- **Status line:** the Set, the slot and frame rate it follows, and whether timecode is running; with a Backup slot, whether it is following the Primary or the Backup. It becomes a red banner for an alert: timecode lost, the Primary lost and running on the Backup, a CSV Set (which can only be imported), or an imported Timecode Show on the same slot that would fire the same Actions a second time:
 
   ![The panel with timecode lost](docs/panel-warning.png)
 
 - **Songs:** the Set's Songs and their spans. The current Song is green with `>`; Songs that fired are grey and marked `(fired)`. Tap a Song to send its Start or Stop Actions by hand, even while disarmed, or to edit it. With more than ten Songs, the list follows the current one.
 - **Recent fires:** what happened, newest first: Songs Entered and Ended, each Action sent, Jumps, Stops and Dropouts. An Action that was not sent is red, with why.
 - **Set:** Load Set (a `.trigit` file from the folders below; the panel remembers it, with its settings, in the show's global variables, and loads it next time), New Set, Add Song, and Show Lock (below).
-- **Settings:** the timecode slot and frame rate to follow, and the mode: Standalone, or Bridge with the bridge computer's IP address (or a broadcast address). Changing any of them disarms TrigIT. MA reads the incoming frame rate but doesn't pass it on to plugins, so set it here: TrigIT needs it to place each Song's end to the frame.
+- **Settings:** the timecode slot and frame rate to follow, a Backup slot (None by default) that TrigIT follows if the first slot's timecode stops, as the Mac app's Backup Timecode Source, and the mode: Standalone, or Bridge with the bridge computer's IP address (or a broadcast address). Changing any of them disarms TrigIT. MA reads the incoming frame rate but doesn't pass it on to plugins, so set it here: TrigIT needs it to place each Song's end to the frame.
 - **Stop Song:** send the current Song's Stop Actions, even while disarmed.
 - **Import Show:** write the Set as a Timecode Show (below), with the panel's slot and frame rate as defaults.
 - **Compact:** shrink the panel to the Playhead, the current Song, Armed and the status line, small enough to keep open next to the console's own views; **Full** brings the rest back. The console stays usable around the panel. Drag it by its title bar: each size reopens where you left it.
@@ -121,7 +121,7 @@ OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose 
 
 ## Differences from the Mac app
 
-The panel runs the Mac app's Show Engine, with the same rules. It follows one slot: no Backup Timecode Source, and no Start or Stop Notes yet, since MIDI input to a plugin is unchecked (#43). A CSV Set can be imported but not followed. The differences below are those of an imported Timecode Show.
+The panel runs the Mac app's Show Engine, with the same rules. It has no Start or Stop Notes yet, since MIDI input to a plugin is unchecked (#43). A CSV Set can be imported but not followed. The differences below are those of an imported Timecode Show.
 
 - **Jumps:** starting timecode in the middle of a Song doesn't fire its Start Actions. The Mac app does, because a Jump landing inside a Song Enters it. MA3 only fires events the playhead passes.
 - **Stops:** MA3 runs on for its slot's afterroll (0.5 s by default) when timecode stops, so a Stop cue within that time still fires.

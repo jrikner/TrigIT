@@ -92,6 +92,53 @@ describe("the Show Engine on the console", function()
     end)
 end)
 
+-- Both slots carry the same timecode from `from`; the primary stops after
+-- `primaryFrames` frames, the backup runs `frames` frames.
+local function playBoth(show, from, frames, primaryFrames, now)
+    local start = ma3.seconds(from, "25")
+    for i = 0, frames * 3 - 1 do
+        if i < primaryFrames * 3 then show:follow(start + i / 75, now + i / 75) end
+        show:follow(start + i / 75, now + i / 75, "backup")
+        show:tick(now + i / 75)
+    end
+    return now + frames / 25
+end
+
+-- How many times the Song's OSC Start Action was sent.
+local function fires(show)
+    local n = 0
+    for _, command in ipairs(show:take()) do if command:find("/go", 1, true) then n = n + 1 end end
+    return n
+end
+
+describe("a Backup slot", function()
+    it("takes over when the primary stops, and the Song fires once", function()
+        local show = live.new(set(), "25", function() return 7 end, true)
+        playBoth(show, "00:59:59:10", 30, 5, 1000)
+        assert.equal(1, fires(show))
+        assert.equal("backup", show.engine.liveSource)
+        assert.equal("primaryLostRunningOnBackup", show.engine.alert)
+    end)
+
+    it("doesn't fire the Song again when the primary stops mid-Song", function()
+        local show = live.new(set(), "25", function() return 7 end, true)
+        local now = playBoth(show, "00:59:59:20", 7, 7, 1000)
+        assert.equal(1, fires(show))
+        playBoth(show, "01:00:00:02", 30, 0, now)
+        assert.equal(0, fires(show))
+        assert.equal("backup", show.engine.liveSource)
+        assert.equal("primaryLostRunningOnBackup", show.engine.alert)
+    end)
+
+    it("is only watched while the primary runs", function()
+        local show = live.new(set(), "25", function() return 7 end, true)
+        playBoth(show, "00:59:59:20", 10, 10, 1000)
+        assert.equal(1, fires(show))
+        assert.equal("primary", show.engine.liveSource)
+        assert.is_nil(show.engine.alert)
+    end)
+end)
+
 describe("slot seconds as timecode", function()
     it("reads back every frame the Timecode Show writes, at each rate", function()
         for _, rate in ipairs({ "24", "25", "29.97 DF", "30" }) do

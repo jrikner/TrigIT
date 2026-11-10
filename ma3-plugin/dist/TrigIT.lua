@@ -1096,7 +1096,7 @@ function live.new(set, rate, lineFor, armed)
     for _, song in ipairs(set.songs or {}) do names[song.id] = song.name end
     return setmetatable({
         engine = engine.new(set, armed), rate = rate, lineFor = lineFor, names = names,
-        log = {}, outbox = {}, later = {}, fired = {},
+        log = {}, outbox = {}, later = {}, fired = {}, positions = {},
     }, Live)
 end
 
@@ -1155,14 +1155,16 @@ function Live:apply(events, now)
     end
 end
 
--- A reading of the slot: `seconds` of timecode at clock time `now`. Only a
--- new frame is a reading, so a slot that has stopped moving goes quiet and
--- tick() finds the Stop.
-function Live:follow(seconds, now)
+-- A reading of a slot: `seconds` of timecode at clock time `now`, from the
+-- "primary" (default) or "backup" slot. Only a new frame is a reading, so a
+-- slot that has stopped moving goes quiet: tick() finds the Stop, and the
+-- engine switches to the other slot if that one is still running.
+function Live:follow(seconds, now, role)
+    role = role or "primary"
     local position = timecode.fromSeconds(seconds, self.rate)
-    if position == self.position then return end
-    self.position = position
-    self:apply(self.engine:handle({ timecode = position, frameRate = self.rate, timestamp = now }), now)
+    if position == self.positions[role] then return end
+    self.positions[role] = position
+    self:apply(self.engine:handle({ timecode = position, frameRate = self.rate, timestamp = now }, role), now)
 end
 
 function Live:tick(now)
@@ -1920,10 +1922,10 @@ local function lineFor(destination)
     return byAddress
 end
 
-local state = { pending = nil, notice = "" }
+local state = { pending = nil, notice = "", lastTime = {} }
 
 local function follow()
-    state.lastTime, state.lastMove = nil, nil
+    state.lastTime, state.lastMove = {}, nil
     state.show = state.set and live.new(state.set, state.rate, lineFor, false)
 end
 
@@ -2204,14 +2206,15 @@ end
 
 -- One dialog for how TrigIT follows timecode and who fires (#97).
 function actions.settings()
-    local slots, rates = {}, {}
-    for n = 1, #Root().TimecodeSlots:Children() do slots["Slot " .. n] = n end
+    local slots, backups, rates = {}, { None = 0 }, {}
+    for n = 1, #Root().TimecodeSlots:Children() do slots["Slot " .. n], backups["Slot " .. n] = n, n end
     for i, rate in ipairs(RATES) do rates[rate] = i end
     local preset = 4
     for i, rate in ipairs(RATES) do if rate == state.rate then preset = i end end
     local reply = MessageBox({
         title = "TrigIT: settings",
         message = "Timecode slot: where the show's timecode arrives.\n"
+            .. "Backup slot: a second slot with the same timecode, or None. TrigIT follows it if the first stops.\n"
             .. "Frame rate: the incoming timecode's. MA reads it but doesn't pass it on to plugins, "
             .. "and TrigIT needs it to place each Song's end to the frame.\n\n"
             .. "Standalone: this console sends the Set's Actions while Armed.\n"
@@ -2223,6 +2226,7 @@ function actions.settings()
         inputs = { { name = "Bridge computer IP", value = state.bridgeTo or "", whiteFilter = "0123456789." } },
         selectors = {
             { name = "Timecode slot", type = 0, values = slots, selectedValue = state.slot },
+            { name = "Backup slot", type = 0, values = backups, selectedValue = state.backup or 0 },
             { name = "Frame rate", type = 1, values = rates, selectedValue = preset },
             { name = "Mode", type = 1, values = { Standalone = 1, Bridge = 2 }, selectedValue = state.mode == "Bridge" and 2 or 1 },
         },
@@ -2234,9 +2238,13 @@ function actions.settings()
         return
     end
     local slot, rate = reply.selectors["Timecode slot"], RATES[reply.selectors["Frame rate"]]
-    if slot == state.slot and rate == state.rate and mode == state.mode and ip == (state.bridgeTo or "") then return end
-    state.slot, state.rate, state.mode, state.bridgeTo = slot, rate, mode, ip
+    local backup = reply.selectors["Backup slot"]
+    if backup == 0 or backup == slot then backup = nil end
+    if slot == state.slot and backup == state.backup and rate == state.rate and mode == state.mode
+        and ip == (state.bridgeTo or "") then return end
+    state.slot, state.backup, state.rate, state.mode, state.bridgeTo = slot, backup, rate, mode, ip
     remember("Slot", slot)
+    remember("BackupSlot", backup or 0)
     remember("Rate", rate)
     remember("Mode", mode)
     remember("BridgeTo", ip)
@@ -2498,8 +2506,10 @@ local function render(ui, now)
     local running = state.lastMove and now - state.lastMove < 0.5
     local first = state.mode == "Bridge" and ("Bridge to %s, %d frames sent"):format(state.bridgeTo, state.frames or 0)
         or state.file and state.file.name .. (state.locked and "  (Show Lock)" or "") or "No Set: Set > Load Set or New Set"
-    local status = ("%s   |   slot %d at %s fps, %s"):format(first, state.slot, state.rate,
-        running and "timecode running" or "no timecode")
+    local status = ("%s   |   slot %d%s at %s fps, %s"):format(first, state.slot,
+        state.backup and (" (backup %d)"):format(state.backup) or "", state.rate,
+        running and (state.backup and engine and engine.liveSource == "backup" and "following Backup"
+            or state.backup and "following Primary" or "timecode running") or "no timecode")
     local alert = engine and ALERTS[engine.alert or ""]
     local warning = alert or (state.mode == "Bridge" and state.bridgeProblem) or (armed and state.twice)
         or (state.notice ~= "" and state.notice)
@@ -2637,6 +2647,8 @@ local function main(_, text)
     state.slot = tonumber(setting("Slot")) or (tc and tonumber(tostring(tc.TCSlot))) or 1
     state.rate = setting("Rate") or (tc and tostring(tc:Get("Note")):match("Frame rate: (.+)$")) or "30"
     state.mode, state.bridgeTo = setting("Mode") or "Standalone", setting("BridgeTo")
+    local backup = tonumber(setting("BackupSlot"))
+    state.backup = backup ~= 0 and backup ~= state.slot and backup or nil
     local path, name = setting("SetPath"), setting("SetName")
     if path and name then load({ path = path, name = name }, true) end
 
@@ -2667,16 +2679,19 @@ local function main(_, text)
             if not ok then ErrPrintf("TrigIT: " .. tostring(problem)) end
         end
         local show = state.show
-        local slot = Root().TimecodeSlots[state.slot]
-        local time = slot and slot.Time
-        -- The slot's first value may be left from long ago: follow it once it moves.
-        if time and time ~= state.lastTime then
-            if state.lastTime then
-                if show then show:follow(time / SLOT_UNITS, now) end
-                if state.mode == "Bridge" then bridge(time / SLOT_UNITS) end
-                state.lastMove = now
+        for role, number in pairs({ primary = state.slot, backup = state.backup }) do
+            local slot = Root().TimecodeSlots[number]
+            local time = slot and slot.Time
+            local last = state.lastTime[role]
+            -- The slot's first value may be left from long ago: follow it once it moves.
+            if time and time ~= last then
+                if last then
+                    if show then show:follow(time / SLOT_UNITS, now, role) end
+                    if role == "primary" and state.mode == "Bridge" then bridge(time / SLOT_UNITS) end
+                    state.lastMove = now
+                end
+                state.lastTime[role] = time
             end
-            state.lastTime = time
         end
         if show then
             show:tick(now)
