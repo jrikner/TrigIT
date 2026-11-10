@@ -42,12 +42,18 @@ describe(".trigit files", function()
                 -- Stop Actions go out when the Playhead plays on past the end.
                 {
                     time = "01:04:00:01", song = intro, phase = "stop", destination = { midi_for = "MA3" },
-                    command = 'SendMIDI "Note" 10/36 100', release = { after = 0.1, command = 'SendMIDI "Note" 10/36 0' },
+                    command = 'SendMIDI "Note" 10/36 100',
+                    release = { after = 0.1, command = 'SendMIDI "Note" 10/36 0', name = "note off" },
+                },
+                -- Art-Net universe 2 is MA3 universe 3; released after the pulse's 0.25 s.
+                {
+                    time = "01:04:00:01", song = intro, phase = "stop", destination = { dmx_for = "MA3" },
+                    command = "DMXUniverse 3.101 At Decimal8 200",
+                    release = { after = 0.25, command = "Off DMXUniverse 3.101", name = "DMX release" },
                 },
             },
             warnings = {
-                'Song "' .. intro .. '": MIDI Show Control Actions aren\'t supported by the MA3 plugin yet; left out',
-                'Song "' .. intro .. '": DMX pulse Actions aren\'t supported by the MA3 plugin yet; left out',
+                'Song "' .. intro .. '": MIDI Show Control Actions can\'t be sent from grandMA3 (SendMIDI has no SysEx); left out',
                 'Song "Start Note only": skipped: it has a Start Note and no timecode span, so it can\'t become timecode events',
                 'Song "Stop Note only": skipped: it has a Stop Note and no timecode span, so it can\'t become timecode events',
                 'Song "Overlaps Intro": overlaps "' .. intro .. '"',
@@ -68,6 +74,24 @@ describe(".trigit files", function()
             'Song "A": Destination "Old" has DMX switched off; Action left out',
             'Song "A": an Action sends to a Destination that isn\'t in the Set; left out',
         }, result.warnings)
+    end)
+
+    it("puts DMX pulses on the MA3 universe the Destination's protocol maps to", function()
+        local function pulse(output, universe)
+            local result = plan.fromTrigit(([[{"format": "TrigIT Set", "version": 1, "set": {
+                "destinations": [{"id": "1", "name": "Node", "usesDMX": true, "dmxOutput": "%s"}],
+                "songs": [{"name": "A", "start": "00:00:01:00", "end": "00:00:02:00", "startActions": [
+                    {"destination": "1", "type": "dmxPulse",
+                     "dmxPulse": {"universe": %d, "channel": 512, "value": 0, "duration": 2}}]}]}}]]):format(output, universe))
+            local event = result.events[1]
+            return event and { event.command, event.release.command, event.release.after } or result.warnings[1]
+        end
+        assert.same({ "DMXUniverse 1.512 At Decimal8 0", "Off DMXUniverse 1.512", 2 }, pulse("artNet", 0))
+        assert.same({ "DMXUniverse 1024.512 At Decimal8 0", "Off DMXUniverse 1024.512", 2 }, pulse("artNet", 1023))
+        assert.same({ "DMXUniverse 1.512 At Decimal8 0", "Off DMXUniverse 1.512", 2 }, pulse("sACNMulticast", 1))
+        assert.same({ "DMXUniverse 1024.512 At Decimal8 0", "Off DMXUniverse 1024.512", 2 }, pulse("sACNUnicast", 1024))
+        assert.equal('Song "A": Art-Net universe 1024 would be MA3 universe 1025; the console has 1-1024', pulse("artNet", 1024))
+        assert.equal('Song "A": sACN universe 1025 would be MA3 universe 1025; the console has 1-1024', pulse("sACNMulticast", 1025))
     end)
 
     it("refuses what isn't a TrigIT Set, as the app does", function()
@@ -141,8 +165,7 @@ describe("CSV", function()
             ";;;MA3;dmx;2.101;;stop",
             ";;;MA3;midi-note;61",
         }, "\n"), { frameRate = "30" })
-        -- DMX pulses are read, as the Mac app would, but MA3 can't send them yet.
-        assert.same({ "line 5: DMX pulse Actions aren't supported by the MA3 plugin yet; left out" }, result.warnings)
+        assert.same({}, result.warnings)
         assert.same({
             { name = "Resolume", kind = "osc" },
             { name = "MA3", kind = "midi+dmx" },
@@ -158,11 +181,19 @@ describe("CSV", function()
             },
             {
                 time = "01:00:00:00", song = "Intro", phase = "start", destination = { midi_for = "MA3" },
-                command = 'SendMIDI "Note" 1/61 127', release = { after = 0.1, command = 'SendMIDI "Note" 1/61 0' },
+                command = 'SendMIDI "Note" 1/61 127',
+                release = { after = 0.1, command = 'SendMIDI "Note" 1/61 0', name = "note off" },
             },
             {
                 time = "01:01:00:00", song = "Intro", phase = "stop", destination = { midi_for = "MA3" },
-                command = 'SendMIDI "Note" 10/36 100', release = { after = 0.1, command = 'SendMIDI "Note" 10/36 0' },
+                command = 'SendMIDI "Note" 10/36 100',
+                release = { after = 0.1, command = 'SendMIDI "Note" 10/36 0', name = "note off" },
+            },
+            -- A CSV Destination's DMX is Art-Net, as in the Mac app: universe 2 is MA3 universe 3.
+            {
+                time = "01:01:00:00", song = "Intro", phase = "stop", destination = { dmx_for = "MA3" },
+                command = "DMXUniverse 3.101 At Decimal8 255",
+                release = { after = 0.5, command = "Off DMXUniverse 3.101", name = "DMX release" },
             },
         }, result.events)
     end)

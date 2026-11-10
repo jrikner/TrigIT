@@ -21,7 +21,7 @@ function live.new(set, rate, lineFor, armed)
     for _, song in ipairs(set.songs or {}) do names[song.id] = song.name end
     return setmetatable({
         engine = engine.new(set, armed), rate = rate, lineFor = lineFor, names = names,
-        log = {}, outbox = {}, later = {}, fired = {},
+        log = {}, outbox = {}, later = {}, fired = {}, positions = {},
     }, Live)
 end
 
@@ -30,7 +30,7 @@ local function describe(action)
     if action.type == "osc" then return "OSC " .. tostring(body.address) end
     if action.type == "midiNote" then return ("note %s/%s"):format(tostring((body.channel or 0) + 1), tostring(body.note)) end
     if action.type == "msc" then return "MSC" end
-    return "DMX pulse"
+    return ("DMX pulse %s.%s"):format(tostring(body.universe), tostring(body.channel))
 end
 
 function Live:note(text, failed)
@@ -80,14 +80,16 @@ function Live:apply(events, now)
     end
 end
 
--- A reading of the slot: `seconds` of timecode at clock time `now`. Only a
--- new frame is a reading, so a slot that has stopped moving goes quiet and
--- tick() finds the Stop.
-function Live:follow(seconds, now)
+-- A reading of a slot: `seconds` of timecode at clock time `now`, from the
+-- "primary" (default) or "backup" slot. Only a new frame is a reading, so a
+-- slot that has stopped moving goes quiet: tick() finds the Stop, and the
+-- engine switches to the other slot if that one is still running.
+function Live:follow(seconds, now, role)
+    role = role or "primary"
     local position = timecode.fromSeconds(seconds, self.rate)
-    if position == self.position then return end
-    self.position = position
-    self:apply(self.engine:handle({ timecode = position, frameRate = self.rate, timestamp = now }), now)
+    if position == self.positions[role] then return end
+    self.positions[role] = position
+    self:apply(self.engine:handle({ timecode = position, frameRate = self.rate, timestamp = now }, role), now)
 end
 
 function Live:tick(now)

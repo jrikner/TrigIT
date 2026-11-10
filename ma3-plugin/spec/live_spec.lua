@@ -19,6 +19,7 @@ local function set()
                 { id = "a", destination = "100", type = "osc", osc = { address = "/go", arguments = { { int = 1 } } } },
                 { id = "b", destination = "200", type = "midiNote", midiNote = { channel = 0, note = 60, velocity = 100 } },
                 { id = "c", destination = "300", type = "dmxPulse", dmxPulse = { universe = 1, channel = 1, value = 255 } },
+                { id = "d", destination = "200", type = "msc", msc = { command = "go", cue = "5" } },
             },
             stopActions = {},
         } },
@@ -46,18 +47,23 @@ describe("the Show Engine on the console", function()
     it("sends a Song's Actions when armed and the Playhead enters it", function()
         local show = live.new(set(), "25", function(d) return d.name == "Resolume" and 7 or nil end, true)
         play(show, "00:59:59:20", 7, 1000)
-        assert.same({ 'SendOSC 7 "/go,i,1"', 'SendMIDI "Note" 1/60 100' }, show:take())
-        assert.same({ 'Intro: DMX pulse to Lights not sent: DMX pulse Actions aren\'t supported by the MA3 plugin yet; left out',
-            "Intro: note 1/60 to Synth", "Intro: OSC /go to Resolume", "Intro entered" }, texts(show))
+        assert.same({ 'SendOSC 7 "/go,i,1"', 'SendMIDI "Note" 1/60 100', "DMXUniverse 2.1 At Decimal8 255" }, show:take())
+        assert.same({ "Intro: MSC to Synth not sent: MIDI Show Control Actions can't be sent from grandMA3 (SendMIDI has no SysEx); left out",
+            "Intro: DMX pulse 1.1 to Lights", "Intro: note 1/60 to Synth", "Intro: OSC /go to Resolume", "Intro entered" },
+            texts(show))
         assert.is_true(show.log[1].failed)
     end)
 
-    it("ends the MIDI note after the note length", function()
+    it("ends the MIDI note after the note length, and the DMX pulse after its duration", function()
         local show = live.new(set(), "25", function() return 7 end, true)
         local now = play(show, "00:59:59:20", 7, 1000)
         show:take()
         show:tick(now + 0.2)
         assert.same({ 'SendMIDI "Note" 1/60 0' }, show:take())
+        show:tick(now + 0.4)
+        assert.same({}, show:take())
+        show:tick(now + 0.5)
+        assert.same({ "Off DMXUniverse 2.1" }, show:take())
     end)
 
     it("sends nothing while disarmed", function()
@@ -70,16 +76,16 @@ describe("the Show Engine on the console", function()
     it("reports an OSC Destination with no line instead of sending", function()
         local show = live.new(set(), "25", function() return nil end, true)
         play(show, "00:59:59:20", 7, 1000)
-        assert.same({ 'SendMIDI "Note" 1/60 100' }, show:take())
+        assert.same({ 'SendMIDI "Note" 1/60 100', "DMXUniverse 2.1 At Decimal8 255" }, show:take())
         assert.same('Intro: OSC /go to Resolume not sent: no OSC line for "Resolume": import the Set, or name a line "TrigIT Resolume"',
-            texts(show)[3])
+            texts(show)[4])
     end)
 
     it("fires by hand even while disarmed", function()
         local show = live.new(set(), "25", function() return 7 end, false)
         show:fire("1", 1000)
-        assert.same({ 'SendOSC 7 "/go,i,1"', 'SendMIDI "Note" 1/60 100' }, show:take())
-        assert.same("Intro fired by hand", texts(show)[4])
+        assert.same({ 'SendOSC 7 "/go,i,1"', 'SendMIDI "Note" 1/60 100', "DMXUniverse 2.1 At Decimal8 255" }, show:take())
+        assert.same("Intro fired by hand", texts(show)[5])
     end)
 
     it("logs the Stop when the slot stops moving, and keeps only the newest entries", function()
@@ -89,6 +95,53 @@ describe("the Show Engine on the console", function()
         assert.same("Timecode stopped", texts(show)[1])
         for i = 1, 10 do show:fire("1", now + 4 + i) end
         assert.same(live.LOG_LENGTH, #show.log)
+    end)
+end)
+
+-- Both slots carry the same timecode from `from`; the primary stops after
+-- `primaryFrames` frames, the backup runs `frames` frames.
+local function playBoth(show, from, frames, primaryFrames, now)
+    local start = ma3.seconds(from, "25")
+    for i = 0, frames * 3 - 1 do
+        if i < primaryFrames * 3 then show:follow(start + i / 75, now + i / 75) end
+        show:follow(start + i / 75, now + i / 75, "backup")
+        show:tick(now + i / 75)
+    end
+    return now + frames / 25
+end
+
+-- How many times the Song's OSC Start Action was sent.
+local function fires(show)
+    local n = 0
+    for _, command in ipairs(show:take()) do if command:find("/go", 1, true) then n = n + 1 end end
+    return n
+end
+
+describe("a Backup slot", function()
+    it("takes over when the primary stops, and the Song fires once", function()
+        local show = live.new(set(), "25", function() return 7 end, true)
+        playBoth(show, "00:59:59:10", 30, 5, 1000)
+        assert.equal(1, fires(show))
+        assert.equal("backup", show.engine.liveSource)
+        assert.equal("primaryLostRunningOnBackup", show.engine.alert)
+    end)
+
+    it("doesn't fire the Song again when the primary stops mid-Song", function()
+        local show = live.new(set(), "25", function() return 7 end, true)
+        local now = playBoth(show, "00:59:59:20", 7, 7, 1000)
+        assert.equal(1, fires(show))
+        playBoth(show, "01:00:00:02", 30, 0, now)
+        assert.equal(0, fires(show))
+        assert.equal("backup", show.engine.liveSource)
+        assert.equal("primaryLostRunningOnBackup", show.engine.alert)
+    end)
+
+    it("is only watched while the primary runs", function()
+        local show = live.new(set(), "25", function() return 7 end, true)
+        playBoth(show, "00:59:59:20", 10, 10, 1000)
+        assert.equal(1, fires(show))
+        assert.equal("primary", show.engine.liveSource)
+        assert.is_nil(show.engine.alert)
     end)
 end)
 

@@ -42,7 +42,31 @@ end
 -- after NOTE_LENGTH. MA3 sends it on the console's MIDI output.
 function commands.midiNote(note)
     local function send(velocity) return ('SendMIDI "Note" %d/%d %d'):format(note.channel + 1, note.note, velocity) end
-    return send(note.velocity), { after = commands.NOTE_LENGTH, command = send(0) }
+    return send(note.velocity), { after = commands.NOTE_LENGTH, command = send(0), name = "note off" }
+end
+
+-- The console's DMX universes (LivePatch.DmxUniverses on onPC 2.5.1).
+commands.UNIVERSES = 1024
+
+-- DMXUniverse <universe>.<channel> At Decimal8 <value>: MA3's DMX tester puts
+-- the exact 8-bit value on the console's own output for that channel, over
+-- whatever the show outputs there. Off DMXUniverse <universe>.<channel>,
+-- `duration` seconds later, releases it: the channel goes back to the show's
+-- value (0 when nothing is patched), where the Mac app sends 0.
+-- The Mac app's universe is an Art-Net port-address (0-based) or an sACN
+-- universe (1-based); MA3's universes are 1-based, and its Art-Net and sACN
+-- lines map universe 1 to Art-Net 0 and sACN 1 unless changed. So Art-Net
+-- universe u is MA3 universe u + 1. `protocol` is the Destination's dmxOutput.
+function commands.dmxPulse(pulse, protocol)
+    local sACN = tostring(protocol):find("^sACN") ~= nil
+    local universe = pulse.universe + (sACN and 0 or 1)
+    if universe < 1 or universe > commands.UNIVERSES then
+        return nil, ("%s universe %d would be MA3 universe %d; the console has 1-%d"):format(
+            sACN and "sACN" or "Art-Net", pulse.universe, universe, commands.UNIVERSES)
+    end
+    local address = ("DMXUniverse %d.%d"):format(universe, pulse.channel)
+    return ("%s At Decimal8 %d"):format(address, pulse.value),
+        { after = pulse.duration or 0.5, command = "Off " .. address, name = "DMX release" }
 end
 
 return commands

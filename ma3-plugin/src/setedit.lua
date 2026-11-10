@@ -108,7 +108,8 @@ function edit.addAction(set, songID, destination, kind, target, value, when)
     local action = { id = edit.newID(), destination = d.id, type = parsed.type }
     action[parsed.type] = parsed[parsed.type]
     if parsed.type == "midiNote" then d.usesMIDI = true end
-    if parsed.type == "dmxPulse" then d.usesDMX = true end
+    -- As the Mac app's usesDMX switch: on, with Art-Net if no output is chosen.
+    if parsed.type == "dmxPulse" then d.usesDMX, d.dmxOutput = true, d.dmxOutput or "artNet" end
     local list = parsed.phase == "stop" and "stopActions" or "startActions"
     song[list] = song[list] or {}
     table.insert(song[list], action)

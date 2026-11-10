@@ -143,8 +143,8 @@ local function chooseOptions(setName, eventCount, follow)
                 { name = "Sequence", value = tostring(defaults.sequence), whiteFilter = "0123456789", vkPlugin = "TextInputNumOnly" },
             },
             selectors = {
-                { name = "Frame rate", type = 1, values = rates, selectedValue = preset or 4 },
-                { name = "Timecode slot", type = 0, values = slots, selectedValue = defaults.slot },
+                { name = " Frame rate", type = 1, values = rates, selectedValue = preset or 4 },
+                { name = "   Timecode slot", type = 0, values = slots, selectedValue = defaults.slot },
             },
         })
         if reply.result ~= 1 then return nil end
@@ -427,10 +427,10 @@ local function lineFor(destination)
     return byAddress
 end
 
-local state = { pending = nil, notice = "" }
+local state = { pending = nil, notice = "", lastTime = {} }
 
 local function follow()
-    state.lastTime, state.lastMove = nil, nil
+    state.lastTime, state.lastMove = {}, nil
     state.show = state.set and live.new(state.set, state.rate, lineFor, false)
 end
 
@@ -596,7 +596,7 @@ local function addActionDialog(songID)
         local result, selectors = ask("add Action",
             "OSC: an address such as /composition/columns/1/connect, and arguments such as 1 or \"text\".\n"
             .. "MIDI note: 60, or channel/note such as 10/36, and a velocity (127 if empty).\n"
-            .. "DMX pulse: universe.channel such as 1.1, and a value (255 if empty). The Mac app sends it; the console can't yet.",
+            .. "DMX pulse: universe.channel such as 1.1, and a value (255 if empty), held 0.5 s. The universe is Art-Net's, as in the Mac app: 0.1 is the console's DMX universe 1.",
             fields, { { value = 1, name = "Add" }, { value = 0, name = "Cancel" } },
             { { name = "Kind", type = 1, values = { OSC = 1, ["MIDI note"] = 2, DMX = 3 }, selectedValue = kind },
               { name = "When", type = 1, values = { Start = 1, Stop = 2 }, selectedValue = when } })
@@ -711,14 +711,16 @@ end
 
 -- One dialog for how TrigIT follows timecode and who fires (#97).
 function actions.settings()
-    local slots, rates = {}, {}
-    for n = 1, #Root().TimecodeSlots:Children() do slots["Slot " .. n] = n end
+    -- Selector values start at 1: a 0 ("None") crashed onPC 2.5.1. So Slot n is n + 1 here.
+    local slots, backups, rates = {}, { None = 1 }, {}
+    for n = 1, #Root().TimecodeSlots:Children() do slots["Slot " .. n], backups["Slot " .. n] = n, n + 1 end
     for i, rate in ipairs(RATES) do rates[rate] = i end
     local preset = 4
     for i, rate in ipairs(RATES) do if rate == state.rate then preset = i end end
     local reply = MessageBox({
         title = "TrigIT: settings",
         message = "Timecode slot: where the show's timecode arrives.\n"
+            .. "Backup slot: a second slot with the same timecode, or None. TrigIT follows it if the first stops.\n"
             .. "Frame rate: the incoming timecode's. MA reads it but doesn't pass it on to plugins, "
             .. "and TrigIT needs it to place each Song's end to the frame.\n\n"
             .. "Standalone: this console sends the Set's Actions while Armed.\n"
@@ -728,22 +730,28 @@ function actions.settings()
             .. "Changing any of these disarms TrigIT.",
         commands = { { value = 1, name = "OK" }, { value = 0, name = "Cancel" } },
         inputs = { { name = "Bridge computer IP", value = state.bridgeTo or "", whiteFilter = "0123456789." } },
+        -- Listed by name: leading spaces keep this order (as in ask()).
         selectors = {
-            { name = "Timecode slot", type = 0, values = slots, selectedValue = state.slot },
-            { name = "Frame rate", type = 1, values = rates, selectedValue = preset },
+            { name = "   Timecode slot", type = 0, values = slots, selectedValue = state.slot },
+            { name = "  Backup slot", type = 0, values = backups, selectedValue = (state.backup or 0) + 1 },
+            { name = " Frame rate", type = 1, values = rates, selectedValue = preset },
             { name = "Mode", type = 1, values = { Standalone = 1, Bridge = 2 }, selectedValue = state.mode == "Bridge" and 2 or 1 },
         },
     })
     if reply.result ~= 1 then return end
-    local mode, ip = reply.selectors.Mode == 2 and "Bridge" or "Standalone", reply.inputs["Bridge computer IP"]
+    local mode, ip = reply.selectors["Mode"] == 2 and "Bridge" or "Standalone", reply.inputs["Bridge computer IP"]
     if mode == "Bridge" and not ip:match("^%d+%.%d+%.%d+%.%d+$") then
         say("address needed", "Bridge mode needs the bridge computer's IP address, such as 192.168.1.20.")
         return
     end
-    local slot, rate = reply.selectors["Timecode slot"], RATES[reply.selectors["Frame rate"]]
-    if slot == state.slot and rate == state.rate and mode == state.mode and ip == (state.bridgeTo or "") then return end
-    state.slot, state.rate, state.mode, state.bridgeTo = slot, rate, mode, ip
+    local slot, rate = reply.selectors["   Timecode slot"], RATES[reply.selectors[" Frame rate"]]
+    local backup = (reply.selectors["  Backup slot"] or 1) - 1
+    if backup == 0 or backup == slot then backup = nil end
+    if slot == state.slot and backup == state.backup and rate == state.rate and mode == state.mode
+        and ip == (state.bridgeTo or "") then return end
+    state.slot, state.backup, state.rate, state.mode, state.bridgeTo = slot, backup, rate, mode, ip
     remember("Slot", slot)
+    remember("BackupSlot", backup or 0)
     remember("Rate", rate)
     remember("Mode", mode)
     remember("BridgeTo", ip)
@@ -1005,8 +1013,10 @@ local function render(ui, now)
     local running = state.lastMove and now - state.lastMove < 0.5
     local first = state.mode == "Bridge" and ("Bridge to %s, %d frames sent"):format(state.bridgeTo, state.frames or 0)
         or state.file and state.file.name .. (state.locked and "  (Show Lock)" or "") or "No Set: Set > Load Set or New Set"
-    local status = ("%s   |   slot %d at %s fps, %s"):format(first, state.slot, state.rate,
-        running and "timecode running" or "no timecode")
+    local status = ("%s   |   slot %d%s at %s fps, %s"):format(first, state.slot,
+        state.backup and (" (backup %d)"):format(state.backup) or "", state.rate,
+        running and (state.backup and engine and engine.liveSource == "backup" and "following Backup"
+            or state.backup and "following Primary" or "timecode running") or "no timecode")
     local alert = engine and ALERTS[engine.alert or ""]
     local warning = alert or (state.mode == "Bridge" and state.bridgeProblem) or (armed and state.twice)
         or (state.notice ~= "" and state.notice)
@@ -1039,24 +1049,20 @@ end
 
 -- The panel only shows TrigIT: closing it leaves the loop below running
 -- (#94), and running the plugin again opens a new panel on the same state.
-local function closePanel()
-    for i = 1, 16 do
-        local display = GetDisplayByIndex(i)
-        if not display then return end
-        local panel = display.ScreenOverlay:FindRecursive(PANEL)
-        if panel then return panel:Parent():Remove(panel:Index()) end
-    end
-end
-
 local function displays()
     local list, i = {}, 1
     while GetDisplayByIndex(i) do list[i], i = GetDisplayByIndex(i), i + 1 end
     return list
 end
 
+-- This run's panel, or a new one. A panel left by another copy of the
+-- plugin (re-imported) is never removed from here: removing a panel while
+-- its dialog was open crashed onPC 2.5.1 (#94, #100). It says TrigIT
+-- stopped, and closes with its ✖.
 local function openPanel()
-    for _, display in ipairs(displays()) do
-        if display.ScreenOverlay:FindRecursive(PANEL) then return end
+    if state.ui and IsObjectValid(state.ui.base) then
+        state.ui.base.Name = PANEL
+        return
     end
     local display = GetDisplayByIndex(number(setting("Screen")) or 1) or GetDisplayByIndex(1)
     state.ui = build(display.ScreenOverlay)
@@ -1137,13 +1143,12 @@ local function main(_, text)
     if running then return command(request) end
     if request.verb == "quit" then return Printf("TrigIT is not running") end
 
-    -- A stopped TrigIT's panel is reused; one left by another copy of the
-    -- plugin (re-imported) is closed.
-    if not (state.ui and IsObjectValid(state.ui.base)) then closePanel() end
     local tc = previous()
     state.slot = tonumber(setting("Slot")) or (tc and tonumber(tostring(tc.TCSlot))) or 1
     state.rate = setting("Rate") or (tc and tostring(tc:Get("Note")):match("Frame rate: (.+)$")) or "30"
     state.mode, state.bridgeTo = setting("Mode") or "Standalone", setting("BridgeTo")
+    local backup = tonumber(setting("BackupSlot"))
+    state.backup = backup ~= 0 and backup ~= state.slot and backup or nil
     local path, name = setting("SetPath"), setting("SetName")
     if path and name then load({ path = path, name = name }, true) end
 
@@ -1174,16 +1179,19 @@ local function main(_, text)
             if not ok then ErrPrintf("TrigIT: " .. tostring(problem)) end
         end
         local show = state.show
-        local slot = Root().TimecodeSlots[state.slot]
-        local time = slot and slot.Time
-        -- The slot's first value may be left from long ago: follow it once it moves.
-        if time and time ~= state.lastTime then
-            if state.lastTime then
-                if show then show:follow(time / SLOT_UNITS, now) end
-                if state.mode == "Bridge" then bridge(time / SLOT_UNITS) end
-                state.lastMove = now
+        for role, number in pairs({ primary = state.slot, backup = state.backup }) do
+            local slot = Root().TimecodeSlots[number]
+            local time = slot and slot.Time
+            local last = state.lastTime[role]
+            -- The slot's first value may be left from long ago: follow it once it moves.
+            if time and time ~= last then
+                if last then
+                    if show then show:follow(time / SLOT_UNITS, now, role) end
+                    if role == "primary" and state.mode == "Bridge" then bridge(time / SLOT_UNITS) end
+                    state.lastMove = now
+                end
+                state.lastTime[role] = time
             end
-            state.lastTime = time
         end
         if show then
             show:tick(now)
@@ -1214,8 +1222,12 @@ local function main(_, text)
         put(ui.song, "Text", "Stopped")
         put(ui.arm, "Text", "Stopped")
         put(ui.arm, "BackColor", "Button.Background")
-        put(ui.status, "Text", "TrigIT stopped: nothing is sent. Close this panel, or run the plugin to start again.")
-        put(ui.status, "TextColor", "Global.Text")
+        for _, line in ipairs({ ui.status, ui.compact.status }) do
+            put(line, "Text", "TrigIT stopped: nothing is sent. Close this panel, or run the plugin to start again.")
+            put(line, "TextColor", "Global.Text")
+            put(line, "BackColor", "UIObject.Background")
+        end
+        ui.base.Name = PANEL .. "Stopped" -- so a newly imported copy opens its own
     end
     Printf("TrigIT stopped: nothing is sent until you run the plugin again.")
 end
