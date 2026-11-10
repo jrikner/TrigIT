@@ -97,4 +97,38 @@ function json.decode(text)
     return result
 end
 
+local ESCAPES = { ['"'] = '\\"', ["\\"] = "\\\\", ["\b"] = "\\b", ["\f"] = "\\f", ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" }
+
+-- Pretty JSON with sorted keys, as SetFile.swift writes it. A table with
+-- keys 1..n is an array; an empty table is an empty array (in a Set file
+-- every empty collection is one). Integers stay integers.
+function json.encode(value, indent)
+    indent = indent or ""
+    local kind = type(value)
+    if kind == "string" then
+        return '"' .. value:gsub('[%c"\\]', function(c) return ESCAPES[c] or ("\\u%04x"):format(c:byte()) end) .. '"'
+    elseif kind == "number" then
+        if math.type(value) == "integer" then return tostring(value) end
+        assert(value == value and value ~= math.huge and value ~= -math.huge, "JSON has no NaN or infinity")
+        return value == math.floor(value) and ("%.1f"):format(value) or ("%.17g"):format(value)
+    elseif kind == "boolean" then
+        return tostring(value)
+    elseif kind ~= "table" then
+        error("can't write a " .. kind .. " as JSON")
+    end
+    local inner = indent .. "  "
+    if next(value) == nil then return "[]" end
+    if #value > 0 then
+        local items = {}
+        for i, item in ipairs(value) do items[i] = inner .. json.encode(item, inner) end
+        return "[\n" .. table.concat(items, ",\n") .. "\n" .. indent .. "]"
+    end
+    local keys = {}
+    for key in pairs(value) do keys[#keys + 1] = assert(type(key) == "string" and key, "JSON object keys must be strings") end
+    table.sort(keys)
+    local items = {}
+    for i, key in ipairs(keys) do items[i] = inner .. json.encode(key) .. " : " .. json.encode(value[key], inner) end
+    return "{\n" .. table.concat(items, ",\n") .. "\n" .. indent .. "}"
+end
+
 return json

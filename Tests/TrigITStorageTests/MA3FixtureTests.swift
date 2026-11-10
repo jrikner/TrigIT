@@ -34,6 +34,28 @@ final class MA3FixtureTests: XCTestCase {
         try check(set, "full.trigit")
     }
 
+    /// The other way: a Set made and saved by the plugin's editor (#96,
+    /// spec/setedit_spec.lua writes the file) opens in the Mac app as made.
+    func testConsoleWrittenSetOpens() throws {
+        let data = try Data(contentsOf: Self.folder.appendingPathComponent("console-written.trigit"))
+        let set = try SetFile.decode(data)
+        XCTAssertEqual(set.name, "Made on the console")
+        XCTAssertEqual(set.stopTime, 2)
+        XCTAssertEqual(set.destinations.map(\.name), ["Resolume"])
+        let resolume = try XCTUnwrap(set.destinations.first)
+        XCTAssertEqual(resolume.host, "192.168.1.20")
+        XCTAssertEqual(resolume.port, 7000)
+        XCTAssertEqual(set.songs.map(\.name), ["Intro", "Outro"])
+        let intro = set.songs[0]
+        XCTAssertEqual(intro.start, Timecode("01:00:00:00"))
+        XCTAssertEqual(intro.end, Timecode("01:04:00:00"))
+        XCTAssertEqual(intro.startActions.first?.destinationID, resolume.id)
+        XCTAssertEqual(intro.startActions.first?.message,
+                       .osc(OSCMessage(address: "/composition/columns/1/connect", arguments: [.int(1), .float(0.5), .string("go now")])))
+        XCTAssertEqual(intro.stopActions.first?.message, .midiNote(MIDINote(channel: 9, note: 36, velocity: 100)))
+        XCTAssertEqual(set.songs[1].start, Timecode("01:05:00:00"))
+    }
+
     private func check(_ set: ShowSet, _ name: String) throws {
         let url = Self.folder.appendingPathComponent(name)
         if ProcessInfo.processInfo.environment["TRIGIT_WRITE_FIXTURES"] != nil {

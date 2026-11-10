@@ -99,6 +99,12 @@ function Live:tick(now)
     end
 end
 
+-- An edited Set (#96): the engine takes it without firing anything.
+function Live:updateSet(set)
+    for _, song in ipairs(set.songs or {}) do self.names[song.id] = song.name end
+    self.engine:updateSet(set)
+end
+
 function Live:setArmed(armed) self:apply(self.engine:setArmed(armed), 0) end
 function Live:fire(id, now) self:apply(self.engine:fire(id), now) end
 function Live:fireStop(id, now) self:apply(self.engine:fireStop(id), now) end

@@ -100,4 +100,17 @@ describe("slot seconds as timecode", function()
             end
         end
     end)
+    it("takes an edited Set mid-Song without firing the Song again", function()
+        local show = live.new(set(), "25", function() return 7 end, true)
+        local now = play(show, "00:59:59:20", 7, 1000)
+        show:take()
+        local edited = set()
+        edited.songs[1].name = "Intro (edited)"
+        edited.songs[1]["end"] = "01:00:20:00"
+        show:updateSet(edited)
+        play(show, "01:00:00:05", 10, now)
+        -- Only the first fire's note-off, due 0.1 s after it: no Start Actions again.
+        assert.same({ 'SendMIDI "Note" 1/60 0' }, show:take())
+        assert.same("Intro (edited)", show.names["1"])
+    end)
 end)

@@ -4,7 +4,7 @@
 -- has no require path. Run from ma3-plugin: `lua build.lua`, or
 -- `lua build.lua --check` to fail if dist/ is out of date (CI does).
 
-local MODULES = { "json", "commands", "trigit_plan", "ma3", "timecode", "engine", "live", "artnet", "arguments", "view" }
+local MODULES = { "json", "commands", "trigit_plan", "ma3", "timecode", "engine", "live", "artnet", "arguments", "view", "setedit" }
 local VERSION = "0.1.0"
 
 local function read(path)
