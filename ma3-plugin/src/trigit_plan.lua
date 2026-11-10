@@ -431,4 +431,7 @@ function plan.fromCSV(text, options)
     return result
 end
 
+-- For the console's Set editor (setedit.lua): the same rules as CSV import.
+plan.parseTimecode, plan.parseAction = parseTimecode, parseAction
+
 return plan

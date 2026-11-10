@@ -108,6 +108,40 @@ function json.decode(text)
     return result
 end
 
+local ESCAPES = { ['"'] = '\\"', ["\\"] = "\\\\", ["\b"] = "\\b", ["\f"] = "\\f", ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" }
+
+-- Pretty JSON with sorted keys, as SetFile.swift writes it. A table with
+-- keys 1..n is an array; an empty table is an empty array (in a Set file
+-- every empty collection is one). Integers stay integers.
+function json.encode(value, indent)
+    indent = indent or ""
+    local kind = type(value)
+    if kind == "string" then
+        return '"' .. value:gsub('[%c"\\]', function(c) return ESCAPES[c] or ("\\u%04x"):format(c:byte()) end) .. '"'
+    elseif kind == "number" then
+        if math.type(value) == "integer" then return tostring(value) end
+        assert(value == value and value ~= math.huge and value ~= -math.huge, "JSON has no NaN or infinity")
+        return value == math.floor(value) and ("%.1f"):format(value) or ("%.17g"):format(value)
+    elseif kind == "boolean" then
+        return tostring(value)
+    elseif kind ~= "table" then
+        error("can't write a " .. kind .. " as JSON")
+    end
+    local inner = indent .. "  "
+    if next(value) == nil then return "[]" end
+    if #value > 0 then
+        local items = {}
+        for i, item in ipairs(value) do items[i] = inner .. json.encode(item, inner) end
+        return "[\n" .. table.concat(items, ",\n") .. "\n" .. indent .. "]"
+    end
+    local keys = {}
+    for key in pairs(value) do keys[#keys + 1] = assert(type(key) == "string" and key, "JSON object keys must be strings") end
+    table.sort(keys)
+    local items = {}
+    for i, key in ipairs(keys) do items[i] = inner .. json.encode(key) .. " : " .. json.encode(value[key], inner) end
+    return "{\n" .. table.concat(items, ",\n") .. "\n" .. indent .. "}"
+end
+
 return json
 
 end
@@ -597,6 +631,9 @@ function plan.fromCSV(text, options)
     result.warnings = order
     return result
 end
+
+-- For the console's Set editor (setedit.lua): the same rules as CSV import.
+plan.parseTimecode, plan.parseAction = parseTimecode, parseAction
 
 return plan
 
@@ -1137,6 +1174,12 @@ function Live:tick(now)
     end
 end
 
+-- An edited Set (#96): the engine takes it without firing anything.
+function Live:updateSet(set)
+    for _, song in ipairs(set.songs or {}) do self.names[song.id] = song.name end
+    self.engine:updateSet(set)
+end
+
 function Live:setArmed(armed) self:apply(self.engine:setArmed(armed), 0) end
 function Live:fire(id, now) self:apply(self.engine:fire(id), now) end
 function Live:fireStop(id, now) self:apply(self.engine:fireStop(id), now) end
@@ -1262,6 +1305,192 @@ return view
 
 end
 
+modules["setedit"] = function()
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Making and editing a Set on the console (#96), with the Mac app's rules
+-- (SetEditing.swift): a Song needs a name and a span whose end isn't before
+-- its start, and no two Songs' spans share a frame. Works on the Set table
+-- as trigit_plan.readSet returns it, so fields the console doesn't know
+-- survive a save. Pure Lua, no MA calls.
+
+local json = require("json")
+local plan = require("trigit_plan")
+
+local edit = {}
+
+local function trim(text) return ((text or ""):gsub("^%s+", ""):gsub("%s+$", "")) end
+
+-- IDs are decimal strings of 64-bit numbers, as the Mac app writes them.
+function edit.newID() return tostring(math.random(1, math.maxinteger)) end
+
+function edit.newSet(name)
+    return { id = edit.newID(), name = trim(name) ~= "" and trim(name) or "Untitled Set", songs = {}, destinations = {}, stopTime = 2 }
+end
+
+-- The whole .trigit file.
+function edit.encode(set)
+    return json.encode({ format = "TrigIT Set", version = 1, set = set }) .. "\n"
+end
+
+local function find(list, id)
+    for i, item in ipairs(list or {}) do if item.id == id then return item, i end end
+end
+
+function edit.song(set, id) return (find(set.songs, id)) end
+
+-- Adds a Song (id nil) or changes one's name, start and end. Returns the
+-- Song, or nil and why not, in the Mac app's words.
+function edit.putSong(set, id, name, start, finish)
+    name = trim(name)
+    if name == "" then return nil, "the name is empty" end
+    local from = plan.parseTimecode(start or "")
+    if not from then return nil, ('start "%s" is not a timecode (hh:mm:ss:ff)'):format(trim(start)) end
+    local to = plan.parseTimecode(finish or "")
+    if not to then return nil, ('end "%s" is not a timecode (hh:mm:ss:ff)'):format(trim(finish)) end
+    if to < from then return nil, "end is before start" end
+    for _, other in ipairs(set.songs) do
+        if other.id ~= id and other.start and other["end"] and other.start <= to and from <= other["end"] then
+            return nil, ('overlaps "%s"'):format(other.name or "")
+        end
+    end
+    local song = id and edit.song(set, id)
+    if id and not song then return nil, "that Song is gone" end
+    if not song then
+        song = { id = edit.newID(), startActions = {}, stopActions = {} }
+        set.songs[#set.songs + 1] = song
+    end
+    song.name, song.start, song["end"] = name, from, to
+    return song
+end
+
+function edit.deleteSong(set, id)
+    local _, i = find(set.songs, id)
+    if i then table.remove(set.songs, i) end
+end
+
+-- Moves a Song up (-1) or down (+1) in the list.
+function edit.moveSong(set, id, by)
+    local _, i = find(set.songs, id)
+    local j = i and i + by
+    if not j or j < 1 or j > #set.songs then return end
+    set.songs[i], set.songs[j] = set.songs[j], set.songs[i]
+end
+
+function edit.destinationNamed(set, name)
+    for _, d in ipairs(set.destinations) do
+        if (d.name or ""):lower() == trim(name):lower() then return d end
+    end
+end
+
+-- Adds or changes the OSC Destination called `name`. Returns it, or nil and why not.
+function edit.putDestination(set, name, host, port)
+    name, host = trim(name), trim(host)
+    if name == "" then return nil, "the Destination needs a name" end
+    local octets = { host:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$") }
+    if #octets ~= 4 then return nil, ('"%s" is not an IP address, such as 192.168.1.20'):format(host) end
+    for _, octet in ipairs(octets) do
+        if tonumber(octet) > 255 then return nil, ('"%s" is not an IP address, such as 192.168.1.20'):format(host) end
+    end
+    port = math.tointeger(tonumber(trim(tostring(port or ""))))
+    if not port or port < 1 or port > 65535 then return nil, "the port must be 1-65535" end
+    local d = edit.destinationNamed(set, name)
+    if not d then
+        d = { id = edit.newID(), name = name }
+        set.destinations[#set.destinations + 1] = d
+    end
+    d.host, d.port, d.usesOSC = host, port, true
+    return d
+end
+
+-- Adds an Action to a Song, typed as in the CSV format: kind "osc",
+-- "midi-note" or "dmx", target (OSC address, note, universe.channel), value
+-- (OSC arguments, velocity, DMX value), when "start" or "stop". The
+-- Destination must exist. Returns the Action, or nil and why not.
+function edit.addAction(set, songID, destination, kind, target, value, when)
+    local song = edit.song(set, songID)
+    if not song then return nil, "that Song is gone" end
+    local d = edit.destinationNamed(set, destination)
+    if not d then return nil, ('there is no Destination "%s"'):format(trim(destination)) end
+    local parsed, why = plan.parseAction({ "", "", "", d.name, trim(kind), trim(target), trim(value), trim(when) })
+    if not parsed then return nil, why or "the Action is empty" end
+    local action = { id = edit.newID(), destination = d.id, type = parsed.type }
+    action[parsed.type] = parsed[parsed.type]
+    if parsed.type == "midiNote" then d.usesMIDI = true end
+    if parsed.type == "dmxPulse" then d.usesDMX = true end
+    local list = parsed.phase == "stop" and "stopActions" or "startActions"
+    song[list] = song[list] or {}
+    table.insert(song[list], action)
+    return action
+end
+
+function edit.removeAction(set, songID, actionID)
+    local song = edit.song(set, songID)
+    for _, list in ipairs({ "startActions", "stopActions" }) do
+        local _, i = find(song and song[list], actionID)
+        if i then return table.remove(song[list], i) end
+    end
+end
+
+-- "Start: OSC /go 1 to Resolume", for lists.
+function edit.describe(set, action, phase)
+    local d = find(set.destinations, action.destination)
+    local body, what = action[action.type] or {}, nil
+    if action.type == "osc" then
+        local args = {}
+        for _, a in ipairs(body.arguments or {}) do
+            args[#args + 1] = a.string and ('"%s"'):format(a.string) or tostring(a.int or a.float or "")
+        end
+        what = ("OSC %s%s"):format(body.address or "?", #args > 0 and " " .. table.concat(args, " ") or "")
+    elseif action.type == "midiNote" then
+        what = ("note %d/%d velocity %d"):format((body.channel or 0) + 1, body.note or 0, body.velocity or 127)
+    elseif action.type == "dmxPulse" then
+        what = ("DMX %d.%d at %d"):format(body.universe or 0, body.channel or 0, body.value or 255)
+    else
+        what = action.type or "?"
+    end
+    return ("%s: %s to %s"):format(phase == "stop" and "Stop" or "Start", what, d and d.name or "?")
+end
+
+-- The Mac app's Action presets (Presets.swift), in its words. Each fills an
+-- ordinary OSC Action; nothing remembers the preset. Resolume triggers send
+-- int 1; grandMA3 commands go to "/cmd" (Receive Command on the console's
+-- OSC line). The MSC "GO cue" preset is left out: the console can't send MSC.
+edit.PRESETS = {
+    { label = "Resolume: launch column", fields = { "Column" }, address = "/composition/columns/%d/connect" },
+    { label = "Resolume: launch clip", fields = { "Layer", "Column" }, address = "/composition/layers/%d/clips/%d/connect" },
+    { label = "Resolume: clear layer", fields = { "Layer" }, address = "/composition/layers/%d/clear" },
+    { label = "Resolume: clear composition", fields = {}, address = "/composition/disconnectall" },
+    { label = "Resolume: next column", fields = {}, address = "/composition/connectnextcolumn" },
+    { label = "Resolume: previous column", fields = {}, address = "/composition/connectprevcolumn" },
+    { label = "Resolume: tempo resync", fields = {}, address = "/composition/tempocontroller/resync" },
+    { label = "grandMA3: Go+ executor (OSC)", fields = { "Page", "Executor" }, command = "Go+ Exec %d.%d" },
+    { label = "grandMA3: command (OSC)", fields = { "Command" }, command = "%s" },
+}
+
+-- A preset's OSC address and arguments (as addAction takes them) from what
+-- was typed in its fields, or nil and why not.
+function edit.preset(preset, values)
+    local numbers = {}
+    for i, field in ipairs(preset.fields) do
+        local text = trim(values[i])
+        if preset.command and field == "Command" then
+            if text == "" then return nil, "the command is empty" end
+            numbers[i] = text
+        else
+            local n = text:match("^%d+$") and tonumber(text)
+            if not n or n < 1 then return nil, ('%s "%s" is not a number from 1'):format(field, text) end
+            numbers[i] = n
+        end
+    end
+    if preset.address then return preset.address:format(table.unpack(numbers)), "1" end
+    local command = preset.command:format(table.unpack(numbers))
+    return "/cmd", '"' .. command:gsub('[\\"]', "\\%0") .. '"'
+end
+
+return edit
+
+end
+
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- The grandMA3 side of the plugin, everything that touches MA. Running it
 -- opens the TrigIT panel, which follows a timecode slot in one of two modes
@@ -1289,6 +1518,7 @@ local timecode = require("timecode")
 local artnet = require("artnet")
 local arguments = require("arguments")
 local view = require("view")
+local setedit = require("setedit")
 
 local MARK = "Made by the TrigIT plugin. Importing a Set again replaces it."
 local RATES = { "24", "25", "29.97 DF", "30" }
@@ -1750,6 +1980,228 @@ function actions.load()
     if file then load(file) end
 end
 
+-- MARK: The Set editor (#96)
+
+-- Every edit is saved at once, and the running show takes it without firing
+-- anything (Engine:updateSet), Armed or not, as in the Mac app.
+local function changed()
+    local file = io.open(state.file.path, "wb")
+    if not file then
+        say("can't save", "Could not write " .. state.file.path .. ". The change is kept until TrigIT stops.")
+    else
+        file:write(setedit.encode(state.set))
+        file:close()
+    end
+    if state.show then state.show:updateSet(state.set) else follow() end
+end
+
+-- Show Lock, as in the Mac app: the Set is read-only; arming and firing still work.
+local function editable()
+    if state.locked then
+        say("Show Lock is on", "The Set is read-only during the show. Turn Show Lock off (Set > Show Lock) to edit.")
+        return false
+    end
+    if not state.set then
+        say("nothing to edit", "Load a .trigit Set, or make a New Set. A CSV Set can only be imported.")
+        return false
+    end
+    return true
+end
+
+local function playhead() return state.show and state.show.engine.playhead end
+
+-- A dialog that keeps what was typed when it reopens, as MessageBox can't
+-- change itself: `fields` {name, value}, `commands` {value, name}.
+local function ask(title, message, fields, commands, selectors)
+    -- MessageBox lists inputs by name; leading spaces sort first, so they keep this order.
+    local inputs = {}
+    for i, field in ipairs(fields) do
+        inputs[i] = { name = (" "):rep(#fields - i) .. field[1], value = field[2], whiteFilter = field[3] }
+    end
+    local reply = MessageBox({ title = "TrigIT: " .. title, message = message, commands = commands, inputs = inputs, selectors = selectors })
+    for i, field in ipairs(fields) do field[2] = reply.inputs[inputs[i].name] or field[2] end
+    return reply.result, reply.selectors
+end
+
+local function destinationDialog(name)
+    local fields = { { "Name", name }, { "IP address", "", "0123456789." }, { "Port", "7000", "0123456789" } }
+    while true do
+        local result = ask("new Destination", 'Where OSC Actions to "' .. name .. '" go. MIDI Actions go out of the console\'s MIDI port.',
+            fields, { { value = 1, name = "Add" }, { value = 0, name = "Cancel" } })
+        if result ~= 1 then return nil end
+        local destination, why = setedit.putDestination(state.set, fields[1][2], fields[2][2], fields[3][2])
+        if destination then return destination end
+        say("can't add the Destination", why)
+    end
+end
+
+local KINDS = { "osc", "midi-note", "dmx" }
+
+-- Makes sure the Destination typed exists, asking for its address if new.
+local function destinationFor(name)
+    if setedit.destinationNamed(state.set, name) or not name:find("%S") then return true end
+    return destinationDialog(name) ~= nil
+end
+
+local function presetDialog(songID, preset)
+    local first = state.set.destinations[1]
+    local fields = { { "Destination", first and first.name or "" } }
+    for _, field in ipairs(preset.fields) do fields[#fields + 1] = { field, "" } end
+    local when = 1
+    while true do
+        local result, selectors = ask(preset.label,
+            preset.command and "Needs Receive Command on that console's OSC line. If the line has a prefix, edit the address later."
+                or "Sends int 1, as Resolume expects.",
+            fields, { { value = 1, name = "Add" }, { value = 0, name = "Cancel" } },
+            { { name = "When", type = 1, values = { Start = 1, Stop = 2 }, selectedValue = when } })
+        if result ~= 1 then return end
+        when = selectors.When or when
+        local values = {}
+        for i = 2, #fields do values[#values + 1] = fields[i][2] end
+        local address, arguments = setedit.preset(preset, values)
+        if not address then
+            say("can't add the Action", arguments)
+        elseif destinationFor(fields[1][2]) then
+            local action, why = setedit.addAction(state.set, songID, fields[1][2], "osc", address, arguments,
+                when == 2 and "stop" or "start")
+            if action then return changed() end
+            say("can't add the Action", why)
+        else
+            return
+        end
+    end
+end
+
+local function addActionDialog(songID)
+    local items = {}
+    for i, preset in ipairs(setedit.PRESETS) do items[i] = preset.label end
+    items[#items + 1] = "OSC, MIDI note or DMX: type it..."
+    local _, label = PopupInput({ title = "Add Action", caller = GetFocusDisplay(), items = items })
+    for _, preset in ipairs(setedit.PRESETS) do
+        if preset.label == label then return presetDialog(songID, preset) end
+    end
+    if label ~= items[#items] then return end
+    local first = state.set.destinations[1]
+    local fields = { { "Destination", first and first.name or "" }, { "Address, note or universe.channel", "" },
+        { "Arguments, velocity or value", "" } }
+    local kind, when = 1, 1
+    while true do
+        local result, selectors = ask("add Action",
+            "OSC: an address such as /composition/columns/1/connect, and arguments such as 1 or \"text\".\n"
+            .. "MIDI note: 60, or channel/note such as 10/36, and a velocity (127 if empty).\n"
+            .. "DMX pulse: universe.channel such as 1.1, and a value (255 if empty). The Mac app sends it; the console can't yet.",
+            fields, { { value = 1, name = "Add" }, { value = 0, name = "Cancel" } },
+            { { name = "Kind", type = 1, values = { OSC = 1, ["MIDI note"] = 2, DMX = 3 }, selectedValue = kind },
+              { name = "When", type = 1, values = { Start = 1, Stop = 2 }, selectedValue = when } })
+        if result ~= 1 then return end
+        kind, when = selectors.Kind or kind, selectors.When or when
+        if not destinationFor(fields[1][2]) then return end
+        local action, why = setedit.addAction(state.set, songID, fields[1][2], KINDS[kind], fields[2][2], fields[3][2],
+            when == 2 and "stop" or "start")
+        if action then return changed() end
+        say("can't add the Action", why)
+    end
+end
+
+local function actionsDialog(songID)
+    while true do
+        local song = setedit.song(state.set, songID)
+        if not song then return end
+        local items, byLabel = { "Add Action..." }, {}
+        for _, phase in ipairs({ "start", "stop" }) do
+            for _, action in ipairs(song[phase .. "Actions"] or {}) do
+                local label = ("%d. %s"):format(#items, setedit.describe(state.set, action, phase))
+                items[#items + 1], byLabel[label] = label, action
+            end
+        end
+        local _, label = PopupInput({ title = song.name .. ": tap an Action to remove it", caller = GetFocusDisplay(), items = items })
+        if label == "Add Action..." then
+            addActionDialog(songID)
+        elseif byLabel[label] then
+            local reply = MessageBox({ title = "TrigIT: remove Action", message = label:gsub("^%d+%. ", "") .. "\n\nRemove it?",
+                commands = { { value = 1, name = "Remove" }, { value = 0, name = "Cancel" } } })
+            if reply.result == 1 then
+                setedit.removeAction(state.set, songID, byLabel[label].id)
+                changed()
+            end
+        else
+            return
+        end
+    end
+end
+
+-- Adds a Song (id nil) or edits one. Start and End can be typed, or taken
+-- from the Playhead while the show's timecode plays.
+local function songDialog(id)
+    local song = id and setedit.song(state.set, id)
+    local fields = { { "Name", song and song.name or "" }, { "Start", song and song.start or playhead() or "", "0123456789:" },
+        { "End", song and song["end"] or "", "0123456789:" } }
+    while true do
+        local commands = { { value = 1, name = "Save" }, { value = 2, name = "Start = Playhead" }, { value = 3, name = "End = Playhead" } }
+        if id then
+            commands[#commands + 1] = { value = 4, name = "Actions" }
+            commands[#commands + 1] = { value = 5, name = "Delete" }
+        end
+        commands[#commands + 1] = { value = 0, name = "Cancel" }
+        local result = ask(id and "edit Song" or "add Song",
+            "Start and End as hh:mm:ss:ff. Start = Playhead and End = Playhead take the timecode on the slot now ("
+            .. (playhead() or "none yet") .. "). No two Songs may share a frame.", fields, commands)
+        if result == 0 then return end
+        if result == 2 or result == 3 then
+            if playhead() then fields[result][2] = playhead() else say("no timecode", "No timecode has arrived on the slot yet.") end
+        elseif result == 1 or result == 4 then
+            local saved, why = setedit.putSong(state.set, id, fields[1][2], fields[2][2], fields[3][2])
+            if not saved then
+                say("can't save the Song", why)
+            else
+                changed()
+                id = saved.id
+                if result == 1 then return end
+                actionsDialog(id)
+            end
+        elseif result == 5 then
+            local reply = MessageBox({ title = "TrigIT: delete Song", message = ('Delete "%s" and its Actions?'):format(fields[1][2]),
+                commands = { { value = 1, name = "Delete" }, { value = 0, name = "Cancel" } } })
+            if reply.result == 1 then
+                setedit.deleteSong(state.set, id)
+                return changed()
+            end
+        end
+    end
+end
+
+local function newSet()
+    local fields = { { "Name", "" } }
+    if ask("New Set", "A new, empty Set, saved in the library's trigit folder. Then add Songs.", fields,
+        { { value = 1, name = "Make" }, { value = 0, name = "Cancel" } }) ~= 1 then return end
+    local set = setedit.newSet(fields[1][2])
+    local folder = GetPath(Enums.PathType.Library) .. "/trigit"
+    CreateDirectoryRecursive(folder)
+    local base = set.name:gsub('[/\\:*?"<>|]', "-")
+    local name, n = base .. ".trigit", 1
+    while readFile(folder .. "/" .. name) do n = n + 1; name = ("%s %d.trigit"):format(base, n) end
+    state.file, state.text, state.set, state.notice = { path = folder .. "/" .. name, name = name }, nil, set, ""
+    remember("SetPath", state.file.path)
+    remember("SetName", name)
+    follow()
+    changed()
+end
+
+function actions.set()
+    local items = { "Load Set...", "New Set...", "Add Song...", state.locked and "Show Lock: turn off" or "Show Lock: turn on" }
+    local _, label = PopupInput({ title = "TrigIT Set", caller = GetFocusDisplay(), items = items })
+    if label == items[1] then return actions.load() end
+    if label == items[2] then
+        if state.locked then return editable() end
+        return newSet()
+    end
+    if label == items[3] then return editable() and songDialog(nil) end
+    if label == items[4] then
+        state.locked = not state.locked
+        remember("ShowLock", state.locked and "Yes" or "No")
+    end
+end
+
 -- One dialog for how TrigIT follows timecode and who fires (#97).
 function actions.settings()
     local slots, rates = {}, {}
@@ -1819,14 +2271,21 @@ end
 -- A tapped Song row: send its Start or Stop Actions now, even disarmed.
 function actions.song(row)
     local song = state.ui and state.ui.songRows[row] and state.ui.songRows[row].song
-    if not song or onMac() or not state.show then return end
+    if not song then return end
+    local canFire = state.show and state.mode ~= "Bridge"
+    local commands = {}
+    if canFire then commands = { { value = 1, name = "Fire Start" }, { value = 2, name = "Fire Stop" } } end
+    if not state.locked then commands[#commands + 1] = { value = 3, name = "Edit" } end
+    commands[#commands + 1] = { value = 0, name = "Cancel" }
     local reply = MessageBox({
         title = "TrigIT: " .. song.name,
-        message = "Send this Song's Start or Stop Actions now, even while disarmed?",
-        commands = { { value = 1, name = "Fire Start" }, { value = 2, name = "Fire Stop" }, { value = 0, name = "Cancel" } },
+        message = canFire and "Send this Song's Start or Stop Actions now, even while disarmed?"
+            or "In bridge mode the Mac app fires.",
+        commands = commands,
     })
     if reply.result == 1 then state.show:fire(song.id, Time()) end
     if reply.result == 2 then state.show:fireStop(song.id, Time()) end
+    if reply.result == 3 and editable() then songDialog(song.id) end
 end
 
 function actions.stop()
@@ -1948,7 +2407,7 @@ local function build(overlay)
 
     local buttons = frame:Append("UILayoutGrid")
     buttons.Anchors, buttons.Columns, buttons.Rows = "0,3", 6, 1
-    for i, entry in ipairs({ { "Load Set", "Load" }, { "Settings", "Settings" }, { "Stop Song", "Stop" },
+    for i, entry in ipairs({ { "Set", "Set" }, { "Settings", "Settings" }, { "Stop Song", "Stop" },
         { "Import Show", "Import" }, { "Compact", "Size" }, { "Quit", "Quit" } }) do
         button(buttons, (i - 1) .. ",0", entry[1], entry[2])
     end
@@ -2038,7 +2497,7 @@ local function render(ui, now)
 
     local running = state.lastMove and now - state.lastMove < 0.5
     local first = state.mode == "Bridge" and ("Bridge to %s, %d frames sent"):format(state.bridgeTo, state.frames or 0)
-        or state.file and state.file.name or "No Set loaded: Load Set"
+        or state.file and state.file.name .. (state.locked and "  (Show Lock)" or "") or "No Set: Set > Load Set or New Set"
     local status = ("%s   |   slot %d at %s fps, %s"):format(first, state.slot, state.rate,
         running and "timecode running" or "no timecode")
     local alert = engine and ALERTS[engine.alert or ""]
@@ -2185,7 +2644,8 @@ local function main(_, text)
     state.token, state.quit = token, false
     remember(RUN, token)
     state.compact = setting("Compact") == "Yes"
-    for _, action in ipairs({ "Load", "Settings", "Stop", "Import", "Size", "Quit" }) do
+    state.locked = setting("ShowLock") == "Yes"
+    for _, action in ipairs({ "Set", "Settings", "Stop", "Import", "Size", "Quit" }) do
         signalTable["TrigIT" .. action] = function() state.pending = action:lower() end
     end
     for i = 1, SONG_ROWS do signalTable["TrigITSong" .. i] = function() state.pending = "song" .. i end end

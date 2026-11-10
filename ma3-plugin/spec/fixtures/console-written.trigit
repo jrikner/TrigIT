@@ -1,0 +1,68 @@
+{
+  "format" : "TrigIT Set",
+  "set" : {
+    "destinations" : [
+      {
+        "host" : "192.168.1.20",
+        "id" : "1002",
+        "name" : "Resolume",
+        "port" : 7000,
+        "usesMIDI" : true,
+        "usesOSC" : true
+      }
+    ],
+    "id" : "1001",
+    "name" : "Made on the console",
+    "songs" : [
+      {
+        "end" : "01:04:00:00",
+        "id" : "1003",
+        "name" : "Intro",
+        "start" : "01:00:00:00",
+        "startActions" : [
+          {
+            "destination" : "1002",
+            "id" : "1004",
+            "osc" : {
+              "address" : "/composition/columns/1/connect",
+              "arguments" : [
+                {
+                  "int" : 1
+                },
+                {
+                  "float" : 0.5
+                },
+                {
+                  "string" : "go now"
+                }
+              ]
+            },
+            "type" : "osc"
+          }
+        ],
+        "stopActions" : [
+          {
+            "destination" : "1002",
+            "id" : "1005",
+            "midiNote" : {
+              "channel" : 9,
+              "note" : 36,
+              "velocity" : 100
+            },
+            "type" : "midiNote"
+          }
+        ]
+      },
+      {
+        "end" : "01:06:00:00",
+        "id" : "1006",
+        "name" : "Outro",
+        "start" : "01:05:00:00",
+        "startActions" : [],
+        "stopActions" : []
+      }
+    ],
+    "stopTime" : 2
+  },
+  "version" : 1
+}

@@ -28,9 +28,9 @@ Run the plugin (tap it, or type `Plugin <n>`). It opens the TrigIT panel:
 
   ![The panel with timecode lost](docs/panel-warning.png)
 
-- **Songs:** the Set's Songs and their spans. The current Song is green with `>`; Songs that fired are grey and marked `(fired)`. Tap a Song to send its Start or Stop Actions by hand, even while disarmed. With more than ten Songs, the list follows the current one.
+- **Songs:** the Set's Songs and their spans. The current Song is green with `>`; Songs that fired are grey and marked `(fired)`. Tap a Song to send its Start or Stop Actions by hand, even while disarmed, or to edit it. With more than ten Songs, the list follows the current one.
 - **Recent fires:** what happened, newest first: Songs Entered and Ended, each Action sent, Jumps, Stops and Dropouts. An Action that was not sent is red, with why.
-- **Load Set:** choose a `.trigit` file from the folders below. The panel remembers it, with its settings, in the show's global variables, and loads it next time.
+- **Set:** Load Set (a `.trigit` file from the folders below; the panel remembers it, with its settings, in the show's global variables, and loads it next time), New Set, Add Song, and Show Lock (below).
 - **Settings:** the timecode slot and frame rate to follow, and the mode: Standalone, or Bridge with the bridge computer's IP address (or a broadcast address). Changing any of them disarms TrigIT. MA reads the incoming frame rate but doesn't pass it on to plugins, so set it here: TrigIT needs it to place each Song's end to the frame.
 - **Stop Song:** send the current Song's Stop Actions, even while disarmed.
 - **Import Show:** write the Set as a Timecode Show (below), with the panel's slot and frame rate as defaults.
@@ -42,6 +42,18 @@ The panel sends OSC on the In & Out line named `TrigIT <Destination>` (an import
 Only one TrigIT runs at a time. Running the plugin while TrigIT runs opens its panel; it never starts a second one. Loading another show, or importing the plugin again, stops the running TrigIT and disarms it. Quit TrigIT before you delete or re-import the plugin: deleting a plugin from Lua crashed onPC 2.5.1 in testing.
 
 Use the panel or an imported Timecode Show for a Set, not both: both fire the same Actions.
+
+## Making and editing a Set
+
+The console can make a Set on its own, no Mac needed:
+
+- **Set > New Set** makes an empty Set and saves it in the library's `trigit` folder.
+- **Set > Add Song**, or tap a Song and **Edit**: its Name, Start and End (hh:mm:ss:ff). **Start = Playhead** and **End = Playhead** take the timecode on the slot now, so you can play the track and press at the right moments. **Delete** removes the Song.
+- **Actions** in the Song's dialog lists its Actions; tap one to remove it. **Add Action** offers the Mac app's presets (Resolume: launch column, launch clip, clear layer, clear composition, next and previous column, tempo resync; grandMA3: Go+ executor and command, over OSC), or type an OSC message, MIDI note or DMX pulse as in the CSV columns. A new Destination asks for its IP address and port.
+
+The same rules as the Mac app apply: a Song needs a name, its End can't be before its Start, and no two Songs share a frame. Every change is saved to the Set's file at once, and the running show takes it without firing anything, Armed or not. The file is the Mac app's own format: it opens there unchanged, and fields the console doesn't edit are kept.
+
+**Show Lock** (Set > Show Lock) makes the Set read-only for the show, as in the Mac app: no editing, while arming and firing still work. The status line says so, and the panel remembers it.
 
 ## Commands
 
@@ -95,6 +107,7 @@ OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose 
 - The panel: Load Set, Timecode, Fire Song and Import Show open their dialogs and work; Armed toggles; the panel stays live while its loop runs at about 30 Hz.
 - Closing the panel (#94): with the panel closed and Armed, the slot's generator running across 01:00:00:00 Entered Intro and sent its Action; running the plugin again reopened the panel on the same run with that log. Quit disarmed and stopped it, with the panel left open saying so. A changed run token (as after a re-import or a show load) stopped the loop and closed its panel.
 - Panel (#97): Playhead, current Song with its progress, next Song with its countdown, the red alert banner, fired and current Song rows; tapping a Song row offered Fire Start, Fire Stop and Cancel, and Fire Start sent it; Settings showed slot, rate, mode and IP in one dialog.
+- Set editor (#96): New Set saved a file; Add Song with Name, Start and End in that order; an overlapping Song was refused with 'overlaps "Opener"'; Show Lock hid Edit; Add Action offered the presets, and Resolume: launch clip added `/composition/layers/2/clips/5/connect 1`, saved at once. The Mac app's SetFile.decode opened the saved file with that Action.
 - Commands (#98), sent with `Plugin <n> "..."`: `arm` started TrigIT without its panel, Armed; `open` showed it; `fire intro` fired Intro; `toggle` disarmed; `stop` stopped the current Song; `quit` stopped TrigIT; unknown commands and Songs changed nothing.
 - Compact panel (#95): Compact and Full switch; the rest of onPC stayed usable with the compact panel open; dragged, it came back at the same place after Full and Compact; `screen 2` was refused on a one-screen onPC and `screen 1` stored.
 - Start macro (#99): the first `start` made Macro "TrigIT start"; after the loop was stopped as a show load would, running the macro started TrigIT again, disarmed, without its panel; running it again changed nothing; no second macro was made.
@@ -124,8 +137,10 @@ The panel runs the Mac app's Show Engine, with the same rules. It follows one sl
 - `src/engine.lua` and `src/timecode.lua`: TrigIT's Show Engine ported from `Sources/TrigITEngine/ShowEngine.swift` (#47). Pure Lua. `spec/engine_spec.lua` ports the Swift engine tests one for one.
 - `src/live.lua`: the engine on the console: slot seconds in, MA commands and the panel's log out. Pure Lua.
 - `src/artnet.lua`: ArtTimeCode packets for bridge mode. Pure Lua.
-- `src/json.lua`: a small JSON decoder for `.trigit` files.
+- `src/json.lua`: a small JSON decoder and encoder for `.trigit` files.
 - `src/arguments.lua`: reads the commands above. Pure Lua.
+- `src/setedit.lua`: making and editing a Set, the Mac app's presets, and writing the `.trigit` file. Pure Lua.
+- `src/view.lua`: what the panel shows: progress, countdown, fired Songs. Pure Lua.
 - `adapter/TrigIT.lua`: the MA3 side: the panel and its loop, dialogs, OSC lines, the Sequence and the Timecode. The only file that calls MA.
 - `docs/`: screenshots of the panel on onPC.
 - `build.lua`: bundles all of these into `dist/` (an MA3 plugin can't `require` files). Run `lua build.lua` after changing them, and commit `dist/`. CI fails if it is out of date.
