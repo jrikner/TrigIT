@@ -51,3 +51,35 @@ describe("ma3.cues", function()
             ma3.cues(result, {}))
     end)
 end)
+
+-- The Mac app's grandMA3 export (Sources/TrigITStorage/MA3Export.swift) ports
+-- these rules to Swift; its tests compare its cues with this file. Run with
+-- TRIGIT_WRITE_FIXTURES=1 to rewrite it after changing the rules.
+describe("the Mac app's export fixture", function()
+    it("matches spec/fixtures/ma3-cues.json", function()
+        local json = require("json")
+        local function read(path)
+            local file = assert(io.open(path, "rb"))
+            local text = file:read("a")
+            file:close()
+            return text
+        end
+        local lines, cases = { Resolume = 1, MA3 = 2 }, {}
+        for _, name in ipairs({ "example.trigit", "full.trigit" }) do
+            for _, rate in ipairs({ "30", "25" }) do
+                local result = assert(plan.fromTrigit(read("spec/fixtures/" .. name), { frameRate = rate }))
+                cases[#cases + 1] = {
+                    file = name, frameRate = rate, oscLines = lines,
+                    cues = ma3.cues(result, lines), warnings = result.warnings,
+                }
+            end
+        end
+        local text = json.encode(cases) .. "\n"
+        if os.getenv("TRIGIT_WRITE_FIXTURES") then
+            local file = assert(io.open("spec/fixtures/ma3-cues.json", "wb"))
+            file:write(text)
+            file:close()
+        end
+        assert.same(read("spec/fixtures/ma3-cues.json"), text)
+    end)
+end)

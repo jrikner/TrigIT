@@ -1,0 +1,106 @@
+[
+  {
+    "cues" : [
+      {
+        "command" : "SendOSC 1 \"/composition/columns/1/connect,i,1\"",
+        "name" : "Intro start",
+        "seconds" : 3600.0
+      }
+    ],
+    "file" : "example.trigit",
+    "frameRate" : "30",
+    "oscLines" : {
+      "MA3" : 2,
+      "Resolume" : 1
+    },
+    "warnings" : []
+  },
+  {
+    "cues" : [
+      {
+        "command" : "SendOSC 1 \"/composition/columns/1/connect,i,1\"",
+        "name" : "Intro start",
+        "seconds" : 3600.0
+      }
+    ],
+    "file" : "example.trigit",
+    "frameRate" : "25",
+    "oscLines" : {
+      "MA3" : 2,
+      "Resolume" : 1
+    },
+    "warnings" : []
+  },
+  {
+    "cues" : [
+      {
+        "command" : "SendOSC 1 \"/composition/columns/1/connect,ifs,1,0.5,two words\"",
+        "name" : "Intro \"live\" ✨ start",
+        "seconds" : 3600.0
+      },
+      {
+        "command" : "SendMIDI \"Note\" 10/36 100; DMXUniverse 3.101 At Decimal8 200",
+        "name" : "Intro \"live\" ✨ stop",
+        "seconds" : 3840.0333333333333
+      },
+      {
+        "command" : "SendMIDI \"Note\" 10/36 0",
+        "name" : "Intro \"live\" ✨ note off",
+        "seconds" : 3840.1333333333332
+      },
+      {
+        "command" : "Off DMXUniverse 3.101",
+        "name" : "Intro \"live\" ✨ DMX release",
+        "seconds" : 3840.2833333333333
+      }
+    ],
+    "file" : "full.trigit",
+    "frameRate" : "30",
+    "oscLines" : {
+      "MA3" : 2,
+      "Resolume" : 1
+    },
+    "warnings" : [
+      "Song \"Intro \"live\" ✨\": MIDI Show Control Actions can't be sent from grandMA3 (SendMIDI has no SysEx); left out",
+      "Song \"Start Note only\": skipped: it has a Start Note and no timecode span, so it can't become timecode events",
+      "Song \"Stop Note only\": skipped: it has a Stop Note and no timecode span, so it can't become timecode events",
+      "Song \"Overlaps Intro\": overlaps \"Intro \"live\" ✨\""
+    ]
+  },
+  {
+    "cues" : [
+      {
+        "command" : "SendOSC 1 \"/composition/columns/1/connect,ifs,1,0.5,two words\"",
+        "name" : "Intro \"live\" ✨ start",
+        "seconds" : 3600.0
+      },
+      {
+        "command" : "SendMIDI \"Note\" 10/36 100; DMXUniverse 3.101 At Decimal8 200",
+        "name" : "Intro \"live\" ✨ stop",
+        "seconds" : 3840.04
+      },
+      {
+        "command" : "SendMIDI \"Note\" 10/36 0",
+        "name" : "Intro \"live\" ✨ note off",
+        "seconds" : 3840.1399999999999
+      },
+      {
+        "command" : "Off DMXUniverse 3.101",
+        "name" : "Intro \"live\" ✨ DMX release",
+        "seconds" : 3840.29
+      }
+    ],
+    "file" : "full.trigit",
+    "frameRate" : "25",
+    "oscLines" : {
+      "MA3" : 2,
+      "Resolume" : 1
+    },
+    "warnings" : [
+      "Song \"Intro \"live\" ✨\": MIDI Show Control Actions can't be sent from grandMA3 (SendMIDI has no SysEx); left out",
+      "Song \"Start Note only\": skipped: it has a Start Note and no timecode span, so it can't become timecode events",
+      "Song \"Stop Note only\": skipped: it has a Stop Note and no timecode span, so it can't become timecode events",
+      "Song \"Overlaps Intro\": overlaps \"Intro \"live\" ✨\""
+    ]
+  }
+]

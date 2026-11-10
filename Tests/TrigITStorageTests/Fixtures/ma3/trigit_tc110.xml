@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.5.1.0">
+    <Timecode Name="TrigIT Example Set" Guid="36 DF 15 C4 6A FE E5 02 D5 52 21 B6 C3 14 18 99" Note="Made by the TrigIT plugin. Importing a Set again replaces it.&#xD;Frame rate: 30" Duration="104d04h26m13.26" LoopCount="0" TCSlot="1" AutoStart="Yes" SwitchOff="Keep Playbacks" TimeDisplayFormat="10d11h23m45" FrameReadout="30 fps">
+        <TrackGroup Play="" Rec="">
+            <MarkerTrack Name="Marker" Guid="36 DF 15 C4 D0 3E 8D 17 8A D9 09 BB 95 12 19 99"/>
+            <Track Name="TrigIT Example Set" Guid="36 DF 15 C4 82 4A 82 6A 3F 60 F2 BF 92 12 19 99" Target="ShowData.DataPools.Default.Sequences.TrigIT Example Set" Play="" Rec="">
+                <TimeRange Guid="36 DF 15 C4 13 D7 AF 21 F4 E6 DA C4 92 12 19 99" Duration="To End" Play="" Rec="">
+                    <CmdSubTrack>
+                        <CmdEvent Name="Goto" Time="1h00m00.000" CueDestination="Intro start">
+                            <RealtimeCmd Type="Key" Source="Original" UserProfile="0" Environment="0" User="0" Status="On" IsRealtime="0" IsXFade="0" IgnoreFollow="0" IgnoreCommand="0" Assert="0" IgnoreNetwork="0" FromTriggerNode="0" IgnoreExecTime="0" IssuedByTimecode="0" IgnoreExecXFade="0" IsExecXFade="0" ExecToken="Goto" ValCueDestination="0.6.109.1000"/>
+                        </CmdEvent>
+                        <CmdEvent Name="Goto" Time="1h04m00.033" CueDestination="Intro stop">
+                            <RealtimeCmd Type="Key" Source="Original" UserProfile="0" Environment="0" User="0" Status="On" IsRealtime="0" IsXFade="0" IgnoreFollow="0" IgnoreCommand="0" Assert="0" IgnoreNetwork="0" FromTriggerNode="0" IgnoreExecTime="0" IssuedByTimecode="0" IgnoreExecXFade="0" IsExecXFade="0" ExecToken="Goto" ValCueDestination="0.6.109.2000"/>
+                        </CmdEvent>
+                    </CmdSubTrack>
+                </TimeRange>
+            </Track>
+        </TrackGroup>
+    </Timecode>
+</GMA3>

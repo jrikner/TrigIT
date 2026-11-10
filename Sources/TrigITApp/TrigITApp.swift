@@ -55,6 +55,10 @@ struct SetCommands: Commands {
                 .disabled(model.documentURL == nil)
             Button("Previous Versions…") { model.showingVersions = true }
                 .disabled(model.documentURL == nil)
+            Divider()
+            Menu("Export") {
+                Button("grandMA3 Timecode Show…") { model.showingMA3Export = true }
+            }
         }
         CommandGroup(before: .windowList) {
             Button("Welcome to TrigIT") { model.showingWelcome = true }

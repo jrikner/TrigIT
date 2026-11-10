@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.5.1.0">
+    <Sequence Name="TrigIT Example Set" Guid="36 DF 15 C4 BB 34 70 6A 78 96 F4 89 66 06 16 99" Note="Made by the TrigIT plugin. Importing a Set again replaces it." AutoStart="Yes" AutoStop="Yes" AutoFix="No" AutoStomp="No" SoftLTP="Yes" XFadeReload="No" SwapProtect="No" KillProtect="No" UseExecutorTime="Yes" OffwhenOverridden="Yes" FreezeNShotAtEnd="No" SequMIB="Enabled" AutoPrePos="No" WrapAround="Yes" MasterGoMode="None" SpeedfromRate="No" Tracking="Yes" IncludeLinkLastGo="Yes" RateScale="One" SpeedScale="One" PreferCueAppearance="No" ExecutorDisplayMode="Data and&#xD;Appearance" Action="Pool Default">
+        <Cue Name="OffCue" Release="Yes" Assert="Assert" AllowDuplicates="" TrigType="">
+            <Part Guid="36 DF 15 C4 85 97 1D 5B E2 A3 C5 93 7B 06 16 99" AlignRangeX="No" AlignRangeY="No" AlignRangeZ="No" PreserveGridPositions="No" MAgic="No" Mode="0" Action="Pool Default"/>
+        </Cue>
+        <Cue Name="CueZero" No="  0">
+            <Part Guid="36 DF 15 C4 31 18 34 4C 4C B1 96 9D 74 06 16 99" AlignRangeX="No" AlignRangeY="No" AlignRangeZ="No" PreserveGridPositions="No" MAgic="No" Mode="0" Action="Pool Default"/>
+        </Cue>
+        <Cue Name="Intro start" No="  1" AllowDuplicates="">
+            <Part Name="Intro start" Guid="36 DF 15 C4 88 F3 4D 49 B6 BE 67 A7 74 06 16 99" AlignRangeX="No" AlignRangeY="No" AlignRangeZ="No" PreserveGridPositions="No" MAgic="No" Mode="0" PhaserSync="" Action="Pool Default" PhaserMorph="" Command="SendOSC 1 &quot;/composition/columns/1/connect,i,1&quot;"/>
+        </Cue>
+        <Cue Name="Intro stop" No="  2" AllowDuplicates="">
+            <Part Name="Intro stop" Guid="36 DF 15 C4 47 38 17 44 20 CC 38 B1 D0 05 17 99" AlignRangeX="No" AlignRangeY="No" AlignRangeZ="No" PreserveGridPositions="No" MAgic="No" Mode="0" PhaserSync="" Action="Pool Default" PhaserMorph="" Command="SendOSC 1 &quot;/test/stop,&quot;"/>
+        </Cue>
+    </Sequence>
+</GMA3>

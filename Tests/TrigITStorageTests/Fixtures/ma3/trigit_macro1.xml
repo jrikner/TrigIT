@@ -1,0 +1,6 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<GMA3 DataVersion="2.5.1.0">
+    <Macro Name="TrigIT start" Guid="36 DF 15 C4 3A 9D B0 04 66 53 DF 58 4E FA 95 B7" Note="Made by the TrigIT plugin: run it after loading this show to start TrigIT, disarmed.">
+        <MacroLine Guid="36 DF 15 C4 F5 AE 7F 55 1B DA C7 5D E2 FE 95 B7" Command="Plugin &quot;TrigIT100d&quot; &quot;start&quot;"/>
+    </Macro>
+</GMA3>

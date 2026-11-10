@@ -224,6 +224,15 @@ Every universe a pulse Action uses is sent continuously, 30 times a second, from
 
 **grandMA3 over MSC:** the console has to receive MIDI from the Destination's MIDI output, with MIDI Show Control input switched on.
 
+### grandMA3 Timecode Show, no plugin
+
+**File > Export > grandMA3 Timecode Show…** writes the Set as files a grandMA3 (2.5) imports itself, so the console fires the Set from its own timecode with no TrigIT running: the same Sequence and Timecode Show the [plugin's Import Show](ma3-plugin/README.md#import-show) makes, with the same rules and warnings. Choose the Sequence, Timecode and macro numbers, the timecode slot, the incoming timecode's frame rate (it decides when Stop Actions fire) and an In & Out OSC line for each OSC Destination. The new folder holds:
+
+- `trigit_seq<n>.xml`, `trigit_tc<n>.xml` and `trigit_macro<n>.xml`: copy them into the console's library, under `gma3_library/datapools/sequences`, `timecodes` and `macros` (on a USB stick, the same folders);
+- `README.txt` with the steps: `Import Macro <n> "trigit_macro<n>"` on the command line, then run the macro. It deletes the Timecode and Sequence at the chosen numbers and imports the Set there. The Sequence must stay at its number: the Timecode's events point at its cues by number.
+
+OSC lines can't be made by a command, so set them up by hand in Menu > In & Out > OSC, as the README lists: the Destination's IP and port, Send Command on, Send off, and an interface. MIDI Show Control Actions are left out: grandMA3 can't send them.
+
 <!-- SCREENSHOT: "Add Action from Preset" sheet with grandMA3: Go+ executor chosen, light + dark, @2x -->
 
 ### Learn

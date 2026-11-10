@@ -27,6 +27,7 @@ struct ContentView: View {
         .textFieldStyle(TrigFieldStyle())
         .sheet(isPresented: $model.showingVersions) { PreviousVersionsView() }
         .sheet(isPresented: $model.showingNewSetSetup) { NewSetSetupView() }
+        .sheet(isPresented: $model.showingMA3Export) { MA3ExportView() }
     }
 
     private var main: some View {

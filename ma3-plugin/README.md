@@ -100,6 +100,8 @@ On **Import** it writes:
 
 Importing again, with the same or another Set, replaces that Timecode and Sequence. The plugin finds them by their Note and never touches anything else. **Oops** undoes an import.
 
+The Mac app writes the same Sequence and Timecode as XML files the console imports itself, with no plugin: File > Export > grandMA3 Timecode Show (see the main README). They carry the same Note, so Import Show here replaces them too. Its cue rules are a Swift port of `trigit_plan.lua`, `commands.lua` and `ma3.lua`; `spec/ma3_spec.lua` writes `spec/fixtures/ma3-cues.json`, which the Swift tests compare against. Change both together.
+
 OSC needs an interface: if Menu > In & Out > OSC shows Interface "None", choose one there. The summary says so.
 
 ## What was checked on onPC 2.5.1

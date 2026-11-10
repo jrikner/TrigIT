@@ -124,6 +124,7 @@ final class ShowModel: ObservableObject {
     @Published var documentProblem: String?
     @Published var recentDocuments: [URL] = []
     @Published var showingVersions = false
+    @Published var showingMA3Export = false
     @Published var canUndo = false
     @Published var canRedo = false
     var history = EditHistory<ShowSet>()
