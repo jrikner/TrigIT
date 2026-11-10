@@ -112,7 +112,16 @@ struct SetCommands: Commands {
 /// Launched with `swift run`, the executable has no app bundle, so make it a
 /// regular foreground app with a Dock icon and a focused window.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Held for as long as TrigIT runs: see applicationDidFinishLaunching.
+    private var timingActivity: NSObjectProtocol?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Without this, App Nap slows the 100 Hz clock whenever TrigIT isn't the
+        // front app, and timecode showed 230-320 ms dropouts in the background.
+        // Idle system sleep is still allowed.
+        timingActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+            reason: "Following timecode and firing Actions on time")
         NSApp.setActivationPolicy(.regular)
         // One window per Set: no tab bar, whose + would open a second window on the same Set.
         NSWindow.allowsAutomaticWindowTabbing = false
