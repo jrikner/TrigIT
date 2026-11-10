@@ -11,11 +11,12 @@ Tested on **grandMA3 onPC 2.5.1** (macOS), not yet on a console (spike #43). It 
 
 ## Install
 
-1. Copy `dist/TrigIT.xml` and `dist/TrigIT.lua` into a folder of the MA3 library's plugins folder:
+1. Download `TrigIT-MA3-plugin.zip` from the newest [release](https://github.com/jrikner/TrigIT/releases) and unpack it. Copy its `TrigIT` folder, with `TrigIT.xml` and `TrigIT.lua` in it, into the MA3 library's plugins folder:
    - onPC: `~/MALightingTechnology/gma3_library/datapools/plugins/TrigIT/` (macOS), or the same path under your user folder on Windows.
    - Console: on a USB stick, `grandMA3/gma3_library/datapools/plugins/TrigIT/`.
 2. In a Plugins pool window, edit an empty pool object, tap **Import**, and choose `TrigIT.xml`. Or type `Import Plugin <n> /Path "<that folder>" /File "TrigIT.xml"` on the command line.
-3. Put your Set files in `gma3_library/trigit/`, or at the top of a USB stick, or in a `trigit` folder on it. Export the `.trigit` from the Mac app, or write a CSV (below).
+3. Run it: the panel's title and the System Monitor show its version, such as `TrigIT 0.9.0`. Check it matches the release you downloaded.
+4. Put your Set files in `gma3_library/trigit/`, or at the top of a USB stick, or in a `trigit` folder on it. Export the `.trigit` from the Mac app, or write a CSV (below).
 
 ## The panel
 
@@ -154,7 +155,7 @@ The panel runs the Mac app's Show Engine, with the same rules. It has no Start o
 - `src/view.lua`: what the panel shows: progress, countdown, fired Songs. Pure Lua.
 - `adapter/TrigIT.lua`: the MA3 side: the panel and its loop, dialogs, OSC lines, the Sequence and the Timecode. The only file that calls MA.
 - `docs/`: screenshots of the panel on onPC.
-- `build.lua`: bundles all of these into `dist/` (an MA3 plugin can't `require` files). Run `lua build.lua` after changing them, and commit `dist/`. CI fails if it is out of date.
+- `build.lua`: bundles all of these into `dist/` (an MA3 plugin can't `require` files). Run `lua build.lua` after changing them, and commit `dist/`. CI fails if it is out of date. The version is `VERSION` in `build.lua`; a release builds the plugin with its tag's version instead (`TRIGIT_PLUGIN_VERSION=0.9.0 lua build.lua`), so a release needs no commit.
 - `spec/`: busted tests. `spec/fixtures/*.trigit` are written by the Swift tests (`Tests/TrigITStorageTests/MA3FixtureTests.swift`). After changing those Sets or the file format, run `TRIGIT_WRITE_FIXTURES=1 swift test --filter MA3FixtureTests`.
 
 ## Run the tests

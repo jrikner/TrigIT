@@ -12,9 +12,8 @@ It takes about 20 minutes. You need a Windows 10 or 11 PC and at least one of:
 
 ## 1. Download
 
-1. Open [the CI workflow runs](https://github.com/jrikner/TrigIT/actions/workflows/ci.yml) and click the newest run with a green tick, on `main`.
-2. Scroll down to **Artifacts** and click **TrigIT-Windows** to download a zip. You must be signed in to GitHub; while the repository is private, you must also have accepted your invitation to it. A download is kept for 90 days, so use a recent run.
-3. Right-click the zip, choose **Extract All…**, and extract it to a folder, for example `C:\TrigIT-Windows`.
+1. Open the [Releases page](https://github.com/jrikner/TrigIT/releases) and download `TrigIT-Windows-preview.zip` from the newest release. While the repository is private, you must be signed in to GitHub and have accepted your invitation to it.
+2. Right-click the zip, choose **Extract All…**, and extract it to a folder, for example `C:\TrigIT-Windows`.
 
 The folder holds `TrigITWindows.exe`, the Swift runtime files it needs (the `.dll` files: keep them next to the `.exe`), an example Set `windows-spike-example.trigit`, and this guide.
 

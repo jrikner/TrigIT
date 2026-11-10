@@ -35,13 +35,13 @@ TRIGIT_VERSION=1.0 scripts/sign-and-notarize.sh
 
 ## Releasing from GitHub
 
-`.github/workflows/release.yml` runs `scripts/sign-and-notarize.sh` on a macOS runner whenever a tag starting with `v` is pushed. It then publishes a GitHub Release with `TrigIT.zip`, `TrigIT.zip.sha256` and generated release notes:
+`.github/workflows/release.yml` runs `scripts/sign-and-notarize.sh` on a macOS runner whenever a tag starting with `v` is pushed. It then publishes a GitHub Release with `TrigIT.zip`, `TrigIT.zip.sha256`, `TrigIT-MA3-plugin.zip` (the grandMA3 plugin, built with the tag's version) and generated release notes. A second job builds the Windows preview and adds `TrigIT-Windows-preview.zip`; if it fails, the release stays up without it:
 
 ```sh
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
-A tag with a `-` (`v0.9.0-beta.1`) is marked as a pre-release. The app's version is the tag's numbers only (`0.9.0`), because macOS expects digits and dots there.
+A tag with a `-` (`v0.9.0-beta.1`) is marked as a pre-release. The app's version is the tag's numbers only (`0.9.0`), because macOS expects digits and dots there. The plugin shows the whole tag (`0.9.0-beta.1`) in its panel; its XML gets the numbers only.
 
 The workflow needs these repository secrets (Settings → Secrets and variables → Actions). It stops at the start and names each one that is missing. The quickest way to set them is the wizard: it walks you through exporting the certificate and making the app-specific password, checks the password with Apple, and uploads all five with `gh`:
 

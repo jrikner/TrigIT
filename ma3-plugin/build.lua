@@ -3,9 +3,12 @@
 -- dist/TrigIT.xml and dist/TrigIT.lua. One Lua file, because an MA3 plugin
 -- has no require path. Run from ma3-plugin: `lua build.lua`, or
 -- `lua build.lua --check` to fail if dist/ is out of date (CI does).
+-- The version is VERSION below; a release sets TRIGIT_PLUGIN_VERSION from its
+-- tag (TRIGIT_PLUGIN_VERSION=0.9.0-beta.1 lua build.lua) and ships that build,
+-- uncommitted. Not TRIGIT_VERSION, which the Mac app's scripts read.
 
 local MODULES = { "json", "commands", "trigit_plan", "ma3", "timecode", "engine", "live", "artnet", "arguments", "view", "setedit" }
-local VERSION = "0.1.0"
+local VERSION = os.getenv("TRIGIT_PLUGIN_VERSION") or "0.1.0"
 
 local function read(path)
     local file = assert(io.open(path, "rb"))
@@ -25,6 +28,7 @@ local parts = {
     "    return loaded[name]",
     "end",
 }
+parts[#parts + 1] = ("\nmodules.version = function() return %q end"):format(VERSION)
 for _, name in ipairs(MODULES) do
     parts[#parts + 1] = ("\nmodules[%q] = function()\n%s\nend"):format(name, read("src/" .. name .. ".lua"))
 end
@@ -38,7 +42,7 @@ local files = {
     <ComponentLua Name="TrigIT" FileName="TrigIT.lua" />
   </Plugin>
 </GMA3>
-]]):format(VERSION),
+]]):format(VERSION:match("^%d[%d.]*") or "0.0.0"), -- numbers only: 0.9.0-beta.1 -> 0.9.0
 }
 
 local check = arg[1] == "--check"

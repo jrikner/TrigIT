@@ -65,9 +65,13 @@ shasum -a 256 ~/Downloads/TrigIT.zip
 
 A Homebrew install will come later.
 
+### grandMA3 plugin
+
+Each release also has `TrigIT-MA3-plugin.zip`: the plugin that runs a Set on a grandMA3 console or onPC. Download it from the same release as the Mac app, and install it with [the plugin's guide](ma3-plugin/README.md#install). The panel's title shows the plugin's version.
+
 ### Windows (preview)
 
-TrigIT isn't on Windows yet. A preview runs in a command window and shows a status page in your browser: it follows Art-Net Timecode or LTC and fires a Set's OSC Actions. Download it and test it with [the Windows guide](docs/windows-spike.md). It needs Windows 10 or 11 (64-bit, x64). To build it from source, see [CONTRIBUTING.md](CONTRIBUTING.md#building-on-windows).
+TrigIT isn't on Windows yet. A preview runs in a command window and shows a status page in your browser: it follows Art-Net Timecode or LTC and fires a Set's OSC Actions. Download `TrigIT-Windows-preview.zip` from the [Releases page](https://github.com/jrikner/TrigIT/releases) and test it with [the Windows guide](docs/windows-spike.md). It needs Windows 10 or 11 (64-bit, x64). To build it from source, see [CONTRIBUTING.md](CONTRIBUTING.md#building-on-windows).
 
 ### Permissions on first use
 

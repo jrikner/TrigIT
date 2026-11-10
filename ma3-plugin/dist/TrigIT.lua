@@ -8,6 +8,8 @@ local function require(name)
     return loaded[name]
 end
 
+modules.version = function() return "0.1.0" end
+
 modules["json"] = function()
 -- SPDX-License-Identifier: GPL-3.0-or-later
 -- A small JSON decoder: enough for .trigit Set files, in plain Lua 5.4.
@@ -2416,7 +2418,7 @@ local function build(overlay)
     title.Columns, title.Rows, title.Anchors = 2, 1, "0,0"
     title[2][2].SizePolicy, title[2][2].Size = "Fixed", "60"
     local name = title:Append("TitleButton")
-    name.Text, name.Anchors = "TrigIT", "0,0"
+    name.Text, name.Anchors = "TrigIT " .. require("version"), "0,0"
     title:Append("CloseButton").Anchors = "1,0"
 
     -- Full: Playhead, current and next Song, Armed; an alert banner; Songs
@@ -2716,7 +2718,7 @@ local function main(_, text)
     end
     local ok, problem = pcall(startMacro)
     if not ok then ErrPrintf("TrigIT: " .. tostring(problem)) end
-    Printf("TrigIT is running. Closing its panel leaves it running; run the plugin again to reopen it, Quit to stop it.")
+    Printf("TrigIT " .. require("version") .. " is running. Closing its panel leaves it running; run the plugin again to reopen it, Quit to stop it.")
     command(request) -- opens the panel when asked to, or with no argument
 
     while state.token == token and not state.quit do

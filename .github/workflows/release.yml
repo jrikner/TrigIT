@@ -2,8 +2,9 @@ name: Release
 
 # Pushing a tag such as v1.0.0 or v0.9.0-beta.1 builds TrigIT, signs it with
 # the Developer ID, notarizes and staples it, and publishes a GitHub Release
-# with the zip and its SHA-256. Tags with a "-" are marked as pre-releases.
-# The secrets are listed in docs/release.md.
+# with the zip and its SHA-256, and the grandMA3 plugin stamped with the tag's
+# version. Tags with a "-" are marked as pre-releases. The windows job then adds
+# the Windows preview. The secrets are listed in docs/release.md.
 
 on:
   push:
@@ -38,6 +39,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # build-app.sh numbers the build by commit count
+
+      # Built from the tag with the tag's version (v0.9.0-beta.1 → 0.9.0-beta.1),
+      # not the committed dist/, so a release needs no version commit.
+      - name: Build the grandMA3 plugin
+        run: |
+          brew install lua
+          (cd ma3-plugin && TRIGIT_PLUGIN_VERSION="${TAG#v}" lua build.lua)
+          mkdir -p build/plugin/TrigIT
+          cp -R ma3-plugin/dist/TrigIT.xml ma3-plugin/dist/TrigIT.lua ma3-plugin/README.md ma3-plugin/docs build/plugin/TrigIT/
+          (cd build/plugin && zip -r ../TrigIT-MA3-plugin.zip TrigIT)
 
       # A throwaway keychain, made the default so codesign and notarytool find
       # the certificate and the notary profile in it.
@@ -87,5 +98,36 @@ jobs:
         run: |
           prerelease=()
           [[ "$TAG" == *-* ]] && prerelease=(--prerelease)
-          gh release create "$TAG" build/TrigIT.zip build/TrigIT.zip.sha256 \
+          gh release create "$TAG" build/TrigIT.zip build/TrigIT.zip.sha256 build/TrigIT-MA3-plugin.zip \
             --verify-tag --generate-notes --title "TrigIT ${TAG#v}" "${prerelease[@]}"
+
+  # The Windows preview, packaged as CI packages it, added to the release the
+  # job above made. Like CI's windows job it may fail without failing the
+  # release: it is a preview, and the Mac app and plugin are already out.
+  windows:
+    needs: release
+    runs-on: windows-latest
+    continue-on-error: true
+    env:
+      TAG: ${{ github.ref_name }}
+      SWIFT_VERSION: 6.4.2 # ci.yml checks it matches its own
+    steps:
+      - uses: actions/checkout@v4
+      - uses: compnerd/gha-setup-swift@v0.5.1
+        with:
+          branch: swift-${{ env.SWIFT_VERSION }}-release
+          tag: ${{ env.SWIFT_VERSION }}-RELEASE
+      - run: swift build -c release --product TrigITWindows
+      - name: Package the Windows preview
+        shell: pwsh
+        run: ./scripts/package-windows.ps1
+      - name: Smoke-run it as CI does
+        shell: pwsh
+        run: ./scripts/smoke-windows.ps1
+      - name: Add it to the GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          Compress-Archive -Path TrigIT-Windows -DestinationPath TrigIT-Windows-preview.zip
+          gh release upload $env:TAG TrigIT-Windows-preview.zip

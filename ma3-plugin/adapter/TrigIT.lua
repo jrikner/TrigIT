@@ -872,7 +872,7 @@ local function build(overlay)
     title.Columns, title.Rows, title.Anchors = 2, 1, "0,0"
     title[2][2].SizePolicy, title[2][2].Size = "Fixed", "60"
     local name = title:Append("TitleButton")
-    name.Text, name.Anchors = "TrigIT", "0,0"
+    name.Text, name.Anchors = "TrigIT " .. require("version"), "0,0"
     title:Append("CloseButton").Anchors = "1,0"
 
     -- Full: Playhead, current and next Song, Armed; an alert banner; Songs
@@ -1172,7 +1172,7 @@ local function main(_, text)
     end
     local ok, problem = pcall(startMacro)
     if not ok then ErrPrintf("TrigIT: " .. tostring(problem)) end
-    Printf("TrigIT is running. Closing its panel leaves it running; run the plugin again to reopen it, Quit to stop it.")
+    Printf("TrigIT " .. require("version") .. " is running. Closing its panel leaves it running; run the plugin again to reopen it, Quit to stop it.")
     command(request) -- opens the panel when asked to, or with no argument
 
     while state.token == token and not state.quit do
