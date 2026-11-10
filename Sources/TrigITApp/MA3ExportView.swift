@@ -35,7 +35,7 @@ struct MA3ExportView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Export grandMA3 Timecode Show").font(TrigType.sectionTitle)
             Text("Writes the Set as a Sequence and a Timecode Show the console imports itself, with a macro that imports them. No TrigIT plugin is needed.")
-                .font(.system(size: 16))
+                .font(.body)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             ScrollView {
@@ -123,7 +123,7 @@ struct MA3ExportView: View {
 
     private func numberField(_ value: Binding<Int>) -> some View {
         TextField("", value: value, format: .number.grouping(.never))
-            .textFieldStyle(TrigFieldStyle())
+            .textFieldStyle(.roundedBorder)
             .font(TrigType.body.monospacedDigit())
             .multilineTextAlignment(.trailing)
             .frame(width: 90)

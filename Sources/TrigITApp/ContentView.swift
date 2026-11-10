@@ -6,8 +6,6 @@ import TrigITStorage
 
 struct ContentView: View {
     @EnvironmentObject private var model: ShowModel
-    @SceneStorage("appMode") private var mode: AppMode = .edit
-    @SceneStorage("editSection") private var section: EditSection = .songs
     @State private var closedDocumentProblem: String?
     @State private var closedAlert: String?
 
@@ -24,7 +22,7 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .controlSize(.large)
-        .textFieldStyle(TrigFieldStyle())
+        .textFieldStyle(.roundedBorder)
         .sheet(isPresented: $model.showingVersions) { PreviousVersionsView() }
         .sheet(isPresented: $model.showingNewSetSetup) { NewSetSetupView() }
         .sheet(isPresented: $model.showingMA3Export) { MA3ExportView() }
@@ -38,9 +36,9 @@ struct ContentView: View {
             if let alert = visibleAlert {
                 Banner(text: alert, pulses: true) { closedAlert = alert }
             }
-            switch mode {
+            switch model.mode {
             case .show: ShowScreenView()
-            case .edit: EditView(section: $section)
+            case .edit: EditView(section: $model.section)
             }
             // In the layout, not a safe-area inset: the split view's scroll views
             // ignore that inset, so their last rows ended up under the panel.
@@ -48,41 +46,42 @@ struct ContentView: View {
                 SimulatorPanel().padding(8)
             }
         }
-        .background(modeShortcuts)
+        .background(closeWarningsShortcut)
         // Once a problem clears, the same problem coming back shows again.
         .onChange(of: model.alertLines.isEmpty) { if $0 { closedAlert = nil } }
         .onChange(of: model.documentProblem == nil) { if $0 { closedDocumentProblem = nil } }
         .toolbar { toolbar }
-        .onChange(of: model.isShowLocked) { if $0 { mode = .show } }
-        .onAppear { if model.isShowLocked { mode = .show } }
-        .navigationTitle(mode == .show ? model.setTitle : section.rawValue)
-        .navigationSubtitle(mode == .show ? "" : model.setTitle)
+        .onAppear { if model.isShowLocked { model.setMode(.show) } }
+        .navigationTitle(model.mode == .show ? model.setTitle : model.section.rawValue)
+        .navigationSubtitle(model.mode == .show ? "" : model.setTitle)
     }
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             // Show Lock keeps TrigIT in Show mode: Edit is off until the lock is off.
-            Picker("Mode", selection: Binding(get: { mode }, set: { if $0 == .show || !model.isShowLocked { mode = $0 } })) {
+            Picker("Mode", selection: Binding(get: { model.mode }, set: { model.setMode($0) })) {
                 Text("Show").tag(AppMode.show)
                 Text("Edit").tag(AppMode.edit)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .controlSize(.large)
-            .frame(width: 180)
             .help(model.isShowLocked ? "Turn off Show Lock to edit" : "Show (⌘1) or Edit (⌘2)")
         }
+        if model.mode == .edit && model.section == .fireLog {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Export…") { model.exportLog() }
+            }
+        }
         ToolbarItemGroup(placement: .primaryAction) {
-            if mode == .show {
+            if model.mode == .show {
                 ShowLockButton()
-            } else if section == .fireLog {
-                Button("Export…") { model.exportLog() }.capsuleButton()
-            } else {
+            } else if model.section != .fireLog {
                 SourceStatusLabel()
             }
             ArmButton()
         }
+        .withoutToolbarGlass()
     }
 
     // A closed banner stays hidden until its text changes, so a new problem shows again.
@@ -95,11 +94,9 @@ struct ContentView: View {
         return text.isEmpty || text == closedAlert ? nil : text
     }
 
-    /// ⌘1 and ⌘2 switch modes; Esc closes the warning banners.
-    private var modeShortcuts: some View {
+    /// Esc closes the warning banners (⌘1 and ⌘2 are in the View menu).
+    private var closeWarningsShortcut: some View {
         ZStack {
-            Button("Show") { mode = .show }.keyboardShortcut("1")
-            Button("Edit") { mode = .edit }.keyboardShortcut("2").disabled(model.isShowLocked)
             if visibleDocumentProblem != nil || visibleAlert != nil {
                 Button("Close Warnings") {
                     closedDocumentProblem = visibleDocumentProblem ?? closedDocumentProblem
@@ -216,7 +213,7 @@ struct SourceStatusLabel: View {
         let state = SourceState(model)
         HStack(spacing: 8) {
             StateDot(color: state.color)
-            Text(state.title).font(.system(size: 15, weight: .semibold))
+            Text(state.title).font(.body.weight(.semibold))
         }
         .padding(.horizontal, 8)
         .accessibilityElement(children: .combine)
@@ -241,14 +238,14 @@ struct Banner: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.updatesFrequently)
             Button(action: onClose) {
-                Image(systemName: "xmark").font(.system(size: 15, weight: .bold))
+                Image(systemName: "xmark").font(.body.weight(.bold))
             }
             .buttonStyle(.borderless)
             .foregroundColor(.white)
             .help("Close this warning (Esc). It shows again if the problem changes.")
             .accessibilityLabel("Close warning")
         }
-            .font(.system(size: 19, weight: .semibold))
+            .font(.title3.weight(.semibold))
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .foregroundColor(.white)
@@ -282,7 +279,7 @@ struct PreviousVersionsView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Previous Versions").font(TrigType.sectionTitle)
             Text("TrigIT keeps a version when the Set is opened and every two minutes while you edit, up to 100. Restoring saves the current Set as a version first.")
-                .font(.system(size: 16))
+                .font(.body)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if rows.isEmpty {
@@ -371,13 +368,13 @@ struct PreviousVersionsView: View {
 struct TimecodeField: View {
     let label: String
     let value: Timecode
-    var font: Font = .system(size: 24, weight: .semibold).monospacedDigit()
+    var font: Font = Font.title2.weight(.semibold).monospacedDigit()
     var width: CGFloat = 170
     let onCommit: (Timecode) -> Bool
     @State private var text: String
     @State private var refused = false
 
-    init(_ label: String, value: Timecode, font: Font = .system(size: 24, weight: .semibold).monospacedDigit(),
+    init(_ label: String, value: Timecode, font: Font = Font.title2.weight(.semibold).monospacedDigit(),
          width: CGFloat = 170, onCommit: @escaping (Timecode) -> Bool) {
         self.label = label
         self.value = value
@@ -398,7 +395,7 @@ struct TimecodeField: View {
             }
         ), prompt: Text("hh:mm:ss:ff"))
         .labelsHidden()
-        .textFieldStyle(TrigFieldStyle())
+        .largeField()
         .font(font)
         .foregroundColor(Timecode(text) == nil || refused ? StateColor.alert : .primary)
         .frame(width: width)

@@ -11,7 +11,6 @@ struct TimecodeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text("Timecode").font(TrigType.pageTitle).tracking(-0.4)
                 HStack(alignment: .top, spacing: 20) {
                     SourceColumn(role: .primary)
                     SourceColumn(role: .backup)
@@ -75,7 +74,7 @@ struct SourceColumn: View {
                     let state = SourceRoleState(model, role)
                     HStack(spacing: 6) {
                         StateDot(color: state.color, size: 8)
-                        Text(state.word).font(.system(size: 16, weight: .semibold)).foregroundColor(state.color)
+                        Text(state.word).font(.body.weight(.semibold)).foregroundColor(state.color)
                     }
                 }
             }
@@ -202,7 +201,7 @@ struct LevelMeter: View {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(Double(index) < level * 30
                           ? (index >= 24 ? StateColor.caution : StateColor.ok)
-                          : Color.white.opacity(0.1))
+                          : Surface.tint(0.1))
                     .frame(height: 10)
             }
         }
@@ -217,6 +216,8 @@ struct FireLogView: View {
     @EnvironmentObject private var model: ShowModel
     @State private var filter = Filter.all
     @State private var search = ""
+    @State private var selected = Set<UUID>()
+    @State private var sortOrder = [KeyPathComparator(\ShowModel.LogEntry.date, order: .reverse)]
 
     enum Filter: String, CaseIterable {
         case all = "All", fired = "Fired", failed = "Failed", dropouts = "Dropouts"
@@ -239,6 +240,7 @@ struct FireLogView: View {
 
     private var entries: [ShowModel.LogEntry] {
         model.log.filter { filter.includes($0.kind) && (search.isEmpty || $0.text.localizedCaseInsensitiveContains(search)) }
+            .sorted(using: sortOrder)
     }
 
     var body: some View {
@@ -257,57 +259,49 @@ struct FireLogView: View {
             .padding(.horizontal, 32)
             .padding(.top, 16)
 
-            VStack(spacing: 0) {
-                header
-                RowDivider()
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                            row(entry)
-                                .background(entry.kind == .failed || entry.kind == .problem
-                                            ? StateColor.alert.opacity(0.16)
-                                            : Color.white.opacity(index.isMultiple(of: 2) ? 0 : 0.03))
-                        }
-                    }
+            Table(entries, selection: $selected, sortOrder: $sortOrder) {
+                TableColumn("Time", value: \.date) { entry in
+                    Text(Self.timeFormat.string(from: entry.date)).monospacedDigit().foregroundColor(.secondary)
                 }
+                .width(min: 100, ideal: 120)
+                TableColumn("Timecode", value: \.timecodeText) { entry in
+                    Text(entry.timecodeText).monospacedDigit()
+                }
+                .width(min: 90, ideal: 110)
+                TableColumn("Event", value: \.kind.rawValue) { entry in
+                    Label(entry.kind.rawValue, systemImage: entry.kind.symbol)
+                        .foregroundStyle(entry.kind.color, .primary)
+                }
+                .width(min: 90, ideal: 120)
+                TableColumn("Detail", value: \.text)
+            }
+            .contextMenu(forSelectionType: UUID.self) { ids in
+                Button(ids.count > 1 ? "Copy Rows" : "Copy Row") { copy(ids) }.disabled(ids.isEmpty)
+            }
+            .onCopyCommand {
+                let text = copy(selected, toPasteboard: false)
+                return text.isEmpty ? [] : [NSItemProvider(object: text as NSString)]
             }
         }
-        .searchable(text: $search, placement: .toolbar, prompt: "Search the Fire Log")
+        .searchable(text: $search, placement: .toolbar, prompt: "Search")
     }
 
-    private var header: some View {
-        HStack(spacing: 16) {
-            Text("Time").frame(width: 150, alignment: .leading)
-            Text("Timecode").frame(width: 150, alignment: .leading)
-            Text("Event").frame(width: 150, alignment: .leading)
-            Text("Detail")
-            Spacer()
+    /// The rows as tab-separated lines, in the table's order.
+    @discardableResult
+    private func copy(_ ids: Set<UUID>, toPasteboard: Bool = true) -> String {
+        let text = entries.filter { ids.contains($0.id) }
+            .map { [Self.timeFormat.string(from: $0.date), $0.timecodeText, $0.kind.rawValue, $0.text].joined(separator: "\t") }
+            .joined(separator: "\n")
+        if toPasteboard, !text.isEmpty {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
         }
-        .font(TrigType.groupHeader)
-        .foregroundColor(.secondary)
-        .padding(.horizontal, 32)
-        .padding(.vertical, 8)
+        return text
     }
+}
 
-    private func row(_ entry: ShowModel.LogEntry) -> some View {
-        HStack(spacing: 16) {
-            Text(Self.timeFormat.string(from: entry.date))
-                .font(.system(size: 16).monospacedDigit()).foregroundColor(.secondary)
-                .frame(width: 150, alignment: .leading)
-            Text(entry.timecode?.description ?? "")
-                .font(.system(size: 17, weight: .semibold).monospacedDigit())
-                .frame(width: 150, alignment: .leading)
-            Label(entry.kind.rawValue, systemImage: entry.kind.symbol)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(entry.kind.color, .primary)
-                .frame(width: 150, alignment: .leading)
-            Text(entry.text).font(.system(size: 17)).lineLimit(2).textSelection(.enabled)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 32)
-        .frame(minHeight: 52)
-        .accessibilityElement(children: .combine)
-    }
+extension ShowModel.LogEntry {
+    var timecodeText: String { timecode?.description ?? "" }
 }
 
 extension ShowModel.LogEntry.Kind {

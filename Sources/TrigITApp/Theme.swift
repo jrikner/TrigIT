@@ -4,20 +4,21 @@ import AppKit
 import SwiftUI
 import TrigITEngine
 
-/// The type scale: larger than macOS defaults, so the show reads from FOH.
+/// The type scale. The readouts are large so the show reads from FOH; the
+/// rest are macOS text styles, the size of the controls next to them.
 enum TrigType {
     static let playhead = Font.system(size: 128, weight: .bold).monospacedDigit()
     static let songHero = Font.system(size: 60, weight: .bold)
     static let readout = Font.system(size: 60, weight: .bold).monospacedDigit()
     static let simReadout = Font.system(size: 48, weight: .bold).monospacedDigit()
-    static let pageTitle = Font.system(size: 32, weight: .bold)
-    static let sectionTitle = Font.system(size: 22, weight: .bold)
-    static let rowTitle = Font.system(size: 18, weight: .semibold)
-    static let label = Font.system(size: 18)
-    static let body = Font.system(size: 17)
-    static let secondary = Font.system(size: 15)
-    static let groupHeader = Font.system(size: 15, weight: .semibold)
-    static let code = Font.system(size: 15, design: .monospaced)
+    static let pageTitle = Font.largeTitle.bold()
+    static let sectionTitle = Font.title2.bold()
+    static let rowTitle = Font.headline
+    static let label = Font.body
+    static let body = Font.body
+    static let secondary = Font.callout
+    static let groupHeader = Font.headline
+    static let code = Font.body.monospaced()
 }
 
 /// Colour only ever means state, and always comes with a word or symbol.
@@ -32,11 +33,19 @@ enum StateColor {
     static let idle = Color(nsColor: .systemGray)
 }
 
-/// Surfaces of the dark window.
+/// Surfaces of the dark window. Each gets stronger with Increase Contrast.
 enum Surface {
     static let panel = Color(red: 0x2A / 255, green: 0x2A / 255, blue: 0x2A / 255)
-    static let hairline = Color.white.opacity(0.08)
-    static let selection = Color.primary.opacity(0.14)
+    static let hairline = Color(nsColor: .separatorColor)
+    static let selection = tint(0.14)
+
+    /// A white tint over the dark window: fills, tracks, hover.
+    static func tint(_ opacity: Double) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let high = appearance.bestMatch(from: [.accessibilityHighContrastDarkAqua, .accessibilityHighContrastAqua]) != nil
+            return NSColor.white.withAlphaComponent(high ? min(1, opacity * 2.5) : opacity)
+        })
+    }
 }
 
 /// Show mode is glanceable from FOH; Edit mode has the sidebar.
@@ -73,16 +82,24 @@ enum AppIcon {
     }()
 }
 
-/// Text fields that grow with their font, so large timecode is never clipped
-/// (the system rounded-border field keeps a fixed height).
-struct TrigFieldStyle: TextFieldStyle {
-    func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration
+extension View {
+    /// A text field that grows with a large font (timecode, a Song's name);
+    /// the system rounded-border field keeps a fixed height and clips it.
+    func largeField() -> some View { modifier(LargeField()) }
+}
+
+private struct LargeField: ViewModifier {
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
             .textFieldStyle(.plain)
+            .focused($focused)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.07)))
-            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Surface.tint(0.07)))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(focused ? Color(nsColor: .keyboardFocusIndicatorColor) : Surface.hairline, lineWidth: focused ? 3 : 1))
     }
 }
 
@@ -139,7 +156,7 @@ struct GroupedBox<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) { content }
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.05)))
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Surface.tint(0.05)))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Surface.hairline, lineWidth: 1))
     }
 }
@@ -162,8 +179,8 @@ struct FormRow<Trailing: View>: View {
             Spacer(minLength: 12)
             trailing
         }
-        .padding(.vertical, 8)
-        .frame(minHeight: 52)
+        .padding(.vertical, 6)
+        .frame(minHeight: 36)
     }
 }
 
@@ -182,79 +199,96 @@ struct Footnote: View {
 }
 
 extension View {
-    /// The standard large capsule button.
-    func capsuleButton() -> some View { buttonStyle(CapsuleButtonStyle(prominent: false)) }
+    /// A system bordered button.
+    func capsuleButton() -> some View { buttonStyle(.bordered) }
 
     /// The default action button (Restore, Continue).
-    func prominentCapsuleButton() -> some View { buttonStyle(CapsuleButtonStyle(prominent: true)) }
+    func prominentCapsuleButton() -> some View { buttonStyle(.borderedProminent) }
+
 }
 
-/// A 17 pt capsule button, sized for the show (system bordered buttons stay small).
-struct CapsuleButtonStyle: ButtonStyle {
-    let prominent: Bool
-    @Environment(\.isEnabled) private var isEnabled
+/// The + and − under a list, as in Finder and System Settings.
+struct AddRemoveButtons: View {
+    let add: String
+    let remove: String
+    let canRemove: Bool
+    let onAdd: () -> Void
+    let onRemove: () -> Void
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(TrigType.body)
-            .lineLimit(1)
-            .padding(.vertical, 7)
-            .padding(.horizontal, 16)
-            .foregroundColor(prominent ? .black : .primary)
-            .background(Capsule().fill(prominent
-                ? Color.white.opacity(configuration.isPressed ? 0.7 : 0.88)
-                : Color.white.opacity(configuration.isPressed ? 0.22 : 0.12)))
-            .opacity(isEnabled ? 1 : 0.4)
-            .contentShape(Capsule())
+    var body: some View {
+        HStack(spacing: 2) {
+            Button(action: onAdd) { Image(systemName: "plus").frame(width: 24, height: 22).contentShape(Rectangle()) }
+                .help(add).accessibilityLabel(add)
+            Button(action: onRemove) { Image(systemName: "minus").frame(width: 24, height: 22).contentShape(Rectangle()) }
+                .help(remove).accessibilityLabel(remove)
+                .disabled(!canRemove)
+        }
+        .buttonStyle(.borderless)
     }
 }
 
-/// Arm and disarm. Armed: red fill, white bolt and word. Disarmed: bordered.
+extension ToolbarContent {
+    /// The Arm, Show Lock and status pills draw their own fill. In a macOS 26
+    /// toolbar, glass behind them would add a second outline, and a system
+    /// prominent button there turns grey whenever TrigIT isn't the active app,
+    /// which Armed must never do.
+    @ToolbarContentBuilder func withoutToolbarGlass() -> some ToolbarContent {
+        if #available(macOS 26, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
+    }
+}
+
+/// A state pill in the toolbar: filled in its colour when on, a hairline
+/// capsule when off. It stays coloured when the window isn't active.
+private struct StatePill: View {
+    let title: String
+    let symbol: String
+    let fill: Color?
+    /// White on red; black on orange, where white is too faint.
+    var onFill: Color = .white
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .labelStyle(.titleAndIcon)
+                .font(.title3.weight(.semibold))
+                .padding(.vertical, 5)
+                .padding(.horizontal, 14)
+                .foregroundColor(fill == nil ? .primary : onFill)
+                .background(Capsule().fill(fill ?? Surface.tint(0.10)))
+                .overlay(Capsule().strokeBorder(fill == nil ? Surface.hairline : .clear))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Arm and disarm: red while Armed. ⇧⌘A in the Show menu.
 struct ArmButton: View {
     @EnvironmentObject private var model: ShowModel
 
     var body: some View {
-        Button {
-            model.setArmed(!model.isArmed)
-        } label: {
-            Label(model.isArmed ? "Armed" : "Disarmed", systemImage: model.isArmed ? "bolt.fill" : "bolt.slash")
-                .labelStyle(.titleAndIcon)
-                .font(.system(size: 18, weight: model.isArmed ? .bold : .semibold))
-                .padding(.vertical, 6)
-                .padding(.horizontal, 18)
-                .foregroundColor(model.isArmed ? .white : .primary)
-                .background(Capsule().fill(model.isArmed ? StateColor.alert : Color.primary.opacity(0.10)))
-                .overlay(Capsule().strokeBorder(model.isArmed ? Color.clear : Surface.hairline))
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .keyboardShortcut("a", modifiers: [.command, .shift])
-        .help(model.isArmed ? "Disarm (⇧⌘A): timecode is still followed, nothing is sent"
-                            : "Arm (⇧⌘A): Songs send their Actions when entered")
-        .accessibilityValue(model.isArmed ? "Armed" : "Disarmed")
+        StatePill(title: model.isArmed ? "Armed" : "Disarmed", symbol: model.isArmed ? "bolt.fill" : "bolt.slash",
+                  fill: model.isArmed ? StateColor.alert : nil) { model.setArmed(!model.isArmed) }
+            .help(model.isArmed ? "Disarm (⇧⌘A): timecode is still followed, nothing is sent"
+                                : "Arm (⇧⌘A): Songs send their Actions when entered")
+            .accessibilityValue(model.isArmed ? "Armed" : "Disarmed")
     }
 }
 
-/// Show Lock: orange fill and lock when on, bordered when off.
+/// Show Lock: orange while on. ⇧⌘L in the Show menu.
 struct ShowLockButton: View {
     @EnvironmentObject private var model: ShowModel
 
     var body: some View {
-        Button {
-            model.setShowLocked(!model.isShowLocked)
-        } label: {
-            Label("Show Lock", systemImage: model.isShowLocked ? "lock.fill" : "lock.open")
-                .labelStyle(.titleAndIcon)
-                .font(.system(size: 16, weight: .semibold))
-                .padding(.vertical, 6)
-                .padding(.horizontal, 16)
-                .foregroundColor(model.isShowLocked ? .black : .primary)
-                .background(Capsule().fill(model.isShowLocked ? StateColor.caution : Color.primary.opacity(0.10)))
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(model.isShowLocked ? .isSelected : [])
-        .help("Make the Set read-only during the show. Arming and the Simulator still work.")
+        StatePill(title: "Show Lock", symbol: model.isShowLocked ? "lock.fill" : "lock.open",
+                  fill: model.isShowLocked ? StateColor.caution : nil, onFill: .black) { model.setShowLocked(!model.isShowLocked) }
+            .accessibilityAddTraits(model.isShowLocked ? .isSelected : [])
+            .help("Make the Set read-only during the show (⇧⌘L). Arming and the Simulator still work.")
     }
 }
 

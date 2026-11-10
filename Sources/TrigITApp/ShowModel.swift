@@ -127,6 +127,16 @@ final class ShowModel: ObservableObject {
     @Published var showingMA3Export = false
     @Published var canUndo = false
     @Published var canRedo = false
+    /// Show or Edit, and the Edit section: in the model so the menu bar can switch them.
+    @Published private(set) var mode = AppMode(rawValue: UserDefaults.standard.string(forKey: "TrigIT.mode") ?? "") ?? .edit {
+        didSet { UserDefaults.standard.set(mode.rawValue, forKey: "TrigIT.mode") }
+    }
+    @Published var section = EditSection(rawValue: UserDefaults.standard.string(forKey: "TrigIT.section") ?? "") ?? .songs {
+        didSet { UserDefaults.standard.set(section.rawValue, forKey: "TrigIT.section") }
+    }
+    /// A Song or Destination added from the menu bar, for its list to select.
+    @Published var songToRename: SongID?
+    @Published var destinationToSelect: DestinationID?
     var history = EditHistory<ShowSet>()
     /// The model of the running app, for the app delegate.
     static weak var current: ShowModel?
@@ -190,9 +200,9 @@ final class ShowModel: ObservableObject {
         artNetInput.onPacket = { [weak self] packet, time in self?.receiveArtNet(packet, at: time) }
         if let status = midiInput.startError { record("MIDI is unavailable (error \(status))", isError: true) }
         restoreSources()
-        openLastDocument()
-        // TrigIT may have been relaunched mid-show: follow the show straight away.
-        setArmed(true)
+        // Relaunched after a crash, maybe mid-show: follow the show straight away.
+        // A normal launch starts disarmed, so nothing fires before you arm.
+        if openLastDocument() { setArmed(true) }
         startClock()
         startDestinationChecks()
     }
@@ -234,7 +244,30 @@ final class ShowModel: ObservableObject {
     func setShowLocked(_ locked: Bool) {
         guard locked != isShowLocked else { return }
         isShowLocked = locked
+        if locked { mode = .show }
         record(locked ? "Show Lock on: the Set is read-only" : "Show Lock off")
+    }
+
+    // MARK: Mode
+
+    /// Show Lock keeps TrigIT in Show mode.
+    func setMode(_ new: AppMode) {
+        if new == .show || !isShowLocked { mode = new }
+    }
+
+    func newSong() {
+        guard !isShowLocked, let id = addSong() else { return }
+        setMode(.edit)
+        section = .songs
+        songToRename = id
+    }
+
+    func newDestination() {
+        guard !isShowLocked else { return }
+        addDestination()
+        setMode(.edit)
+        section = .destinations
+        destinationToSelect = set.destinations.last?.id
     }
 
     /// Runs an edit to the Set unless Show Lock is on; records it for undo

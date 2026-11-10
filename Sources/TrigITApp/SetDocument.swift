@@ -41,8 +41,9 @@ extension ShowModel {
 
     /// At launch: after a crash or a forced quit (TrigIT may have died
     /// mid-show), reopen the last Set straight away; otherwise show the
-    /// welcome screen.
-    func openLastDocument() {
+    /// welcome screen. True if it reopened after a crash.
+    @discardableResult
+    func openLastDocument() -> Bool {
         recentDocuments = (UserDefaults.standard.stringArray(forKey: Self.recentDocumentsKey) ?? [])
             .map { URL(fileURLWithPath: $0) }
         // The app delegate saves through this on quit, synchronously.
@@ -51,9 +52,10 @@ extension ShowModel {
         UserDefaults.standard.set(false, forKey: Self.quitCleanlyKey)
         if !quitCleanly, let path = UserDefaults.standard.string(forKey: Self.lastDocumentKey) {
             open(URL(fileURLWithPath: path))
-        } else {
-            showingWelcome = true
+            return true
         }
+        showingWelcome = true
+        return false
     }
 
     /// Called on a normal quit, so the next launch shows the welcome screen.

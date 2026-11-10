@@ -50,22 +50,18 @@ struct SetEditorView: View {
                 .onDeleteCommand { if let selection, !model.isShowLocked { delete([selection]) } }
                 RowDivider()
                 HStack {
-                    Button { if let id = model.addSong() { rename(id) } } label: {
-                        Label("Song", systemImage: "plus")
+                    AddRemoveButtons(add: "New Song", remove: "Delete Song", canRemove: selection != nil) {
+                        if let id = model.addSong() { rename(id) }
+                    } onRemove: {
+                        if let selection { delete([selection]) }
                     }
-                    Button("Import CSV…") { importCSV() }
                     Spacer()
-                    Button { if let selection { delete([selection]) } } label: {
-                        Label("Delete Song", systemImage: "minus").labelStyle(.iconOnly)
-                    }
-                    .disabled(selection == nil)
-                    .help("Delete the selected Song")
+                    Button("Import CSV…") { importCSV() }.capsuleButton()
                 }
-                .capsuleButton()
                 .disabled(model.isShowLocked)
-                .padding(12)
+                .padding(8)
             }
-            .frame(width: 340)
+            .frame(minWidth: 240, idealWidth: 300, maxWidth: 340)
             .overlay(alignment: .trailing) { Rectangle().fill(Surface.hairline).frame(width: 1) }
 
             Group {
@@ -80,10 +76,21 @@ struct SetEditorView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear { if selection == nil { selection = model.set.songs.first?.id } }
+        .onAppear {
+            if selection == nil { selection = model.set.songs.first?.id }
+            renameRequested()
+        }
+        .onChange(of: model.songToRename) { _ in renameRequested() }
         .sheet(item: $importReport) { summary in
             ImportReportView(summary: summary)
         }
+    }
+
+    /// New Song from the menu bar.
+    private func renameRequested() {
+        guard let id = model.songToRename else { return }
+        model.songToRename = nil
+        rename(id)
     }
 
     private func rename(_ id: SongID) {
@@ -587,7 +594,7 @@ struct ActionRow: View {
                         }
                     }
                 }
-                .font(.system(size: 15))
+                .font(.body)
                 .lineLimit(1)
             }
             .disabled(model.isShowLocked)
@@ -602,6 +609,8 @@ struct ActionRow: View {
                 model.deleteAction(action.id, in: songID)
             } label: {
                 Label("Delete Action", systemImage: "trash").labelStyle(.iconOnly)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .disabled(model.isShowLocked)
@@ -609,6 +618,12 @@ struct ActionRow: View {
         }
         .padding(.vertical, 10)
         .frame(minHeight: 68)
+        .contextMenu {
+            Button("Test") { model.test(action, in: songID) }
+            Divider()
+            Button("Delete Action", role: .destructive) { model.deleteAction(action.id, in: songID) }
+                .disabled(model.isShowLocked)
+        }
         .dropDestination(for: String.self) { items, _ in
             let actions = model.song(songID)?[keyPath: list.keyPath] ?? []
             guard !model.isShowLocked, let raw = items.first.flatMap(UInt64.init),
@@ -681,7 +696,7 @@ struct ImportReportView: View {
                 }
                 .font(TrigType.body)
                 if report.problems.isEmpty {
-                    Text("Every row was imported.").font(.system(size: 16)).foregroundColor(.secondary)
+                    Text("Every row was imported.").font(.body).foregroundColor(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         GroupHeader("Skipped \(report.problems.count) row\(report.problems.count == 1 ? "" : "s")")
@@ -747,19 +762,21 @@ struct NoteTriggerField: View {
     var body: some View {
         HStack(spacing: 4) {
             Text("Channel").foregroundColor(.secondary)
-            TextField("Ch", text: binding(isChannel: true), prompt: Text("ch"))
+            TextField("Ch", text: binding(isChannel: true), prompt: Text("1-16"))
                 .frame(width: 60)
                 .accessibilityLabel("\(label) MIDI channel, 1 to 16")
             Text("Note").foregroundColor(.secondary)
-            TextField("Note", text: binding(isChannel: false), prompt: Text("note"))
+            TextField("Note", text: binding(isChannel: false), prompt: Text("0-127"))
                 .frame(width: 70)
                 .accessibilityLabel("\(label) note number, 0 to 127")
-            Text(value.map { MIDINote(channel: $0.channel, note: $0.note).noteName } ?? "None")
+            // The note's name once set, such as C3; nothing while the row is empty.
+            Text(value.map { MIDINote(channel: $0.channel, note: $0.note).noteName } ?? "")
                 .foregroundColor(.secondary)
                 .frame(width: 48, alignment: .leading)
+                .accessibilityHidden(value == nil)
         }
         .labelsHidden()
-        .textFieldStyle(TrigFieldStyle())
+        .textFieldStyle(.roundedBorder)
         .font(TrigType.body.monospacedDigit())
         .foregroundColor(parsed == nil || refused ? StateColor.alert : .primary)
         .onChange(of: value) { newValue in
@@ -975,7 +992,7 @@ struct MSCFields: View {
             }
         ), prompt: Text("next"))
         .labelsHidden()
-        .font(.system(size: 15).monospacedDigit())
+        .font(.body.monospacedDigit())
         .frame(width: 76)
         Text("List").foregroundColor(.secondary)
         TextField("MSC list", text: Binding(
@@ -987,7 +1004,7 @@ struct MSCFields: View {
             }
         ), prompt: Text("default"))
         .labelsHidden()
-        .font(.system(size: 15).monospacedDigit())
+        .font(.body.monospacedDigit())
         .frame(width: 76)
         Text("Device").foregroundColor(.secondary)
         NumberField("MSC device ID", value: Int(command.deviceID), range: 0...127, width: 40) { id in
@@ -1068,7 +1085,7 @@ struct NumberField: View {
             }
         ))
         .labelsHidden()
-        .font(.system(size: 15).monospacedDigit())
+        .font(.body.monospacedDigit())
         .foregroundColor(parsed == nil ? .red : .primary)
         .frame(width: width + 24)
         .onChange(of: value) { text = String($0) }

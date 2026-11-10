@@ -12,7 +12,7 @@ struct TrigITApp: App {
         WindowGroup("TrigIT") {
             ContentView()
                 .environmentObject(model)
-                .frame(minWidth: 1100, minHeight: 680)
+                .frame(minWidth: 960, minHeight: 620)
         }
         .defaultSize(width: 1280, height: 800)
         .commands { SetCommands(model: model) }
@@ -49,6 +49,12 @@ struct SetCommands: Commands {
             }
             .disabled(model.isShowLocked || model.recentDocuments.isEmpty)
             Divider()
+            Button("New Song") { model.newSong() }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(model.isShowLocked)
+            Button("New Destination") { model.newDestination() }
+                .disabled(model.isShowLocked)
+            Divider()
             Button("Save As…") { model.chooseAndSaveAs() }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
             Button("Show in Finder") { model.showInFinder() }
@@ -59,6 +65,30 @@ struct SetCommands: Commands {
             Menu("Export") {
                 Button("grandMA3 Timecode Show…") { model.showingMA3Export = true }
             }
+        }
+        CommandGroup(before: .toolbar) {
+            Button("Show") { model.setMode(.show) }
+                .keyboardShortcut("1")
+            Button("Edit") { model.setMode(.edit) }
+                .keyboardShortcut("2")
+                .disabled(model.isShowLocked)
+            Divider()
+        }
+        CommandMenu("Show") {
+            Button(model.isArmed ? "Disarm" : "Arm") { model.setArmed(!model.isArmed) }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+            Button(model.isShowLocked ? "Turn Off Show Lock" : "Turn On Show Lock") { model.setShowLocked(!model.isShowLocked) }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+            Divider()
+            let simulator = model.source == .simulator || model.backupSource == .simulator
+            Button(model.simulator.isPlaying ? "Stop Simulator" : "Play Simulator") {
+                if model.simulator.isPlaying { model.stop() } else { model.play() }
+            }
+            .keyboardShortcut("p", modifiers: [.command, .option])
+            .disabled(!simulator)
+        }
+        CommandGroup(replacing: .help) {
+            Button("TrigIT Help") { NSWorkspace.shared.open(URL(string: "https://github.com/jrikner/TrigIT#readme")!) }
         }
         CommandGroup(before: .windowList) {
             Button("Welcome to TrigIT") { model.showingWelcome = true }
@@ -84,6 +114,8 @@ struct SetCommands: Commands {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        // One window per Set: no tab bar, whose + would open a second window on the same Set.
+        NSWindow.allowsAutomaticWindowTabbing = false
         // Without a bundle (`swift run`) the Dock would show a generic icon.
         if Bundle.main.bundleIdentifier == nil { NSApp.applicationIconImage = AppIcon.image }
         NSApp.activate(ignoringOtherApps: true)

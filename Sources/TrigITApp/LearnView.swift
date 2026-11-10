@@ -118,7 +118,7 @@ struct LearnSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(TrigType.sectionTitle)
-            Text(hint).font(.system(size: 16)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(hint).font(.body).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
                 GroupHeader("MIDI inputs")
                 GroupedBox {

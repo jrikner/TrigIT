@@ -58,7 +58,7 @@ struct ShowScreenView: View {
         VStack(alignment: .leading, spacing: 10) {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule().fill(Surface.tint(0.12))
                     Capsule().fill(StateColor.ok)
                         .frame(width: geometry.size.width * min(max(fraction ?? 0, 0), 1))
                 }
@@ -324,7 +324,7 @@ struct SimulatorPanel: View {
                     Button { model.play() } label: {
                         Image(systemName: "play.fill").font(.system(size: 20)).foregroundColor(.black)
                             .frame(width: 52, height: 52)
-                            .background(Circle().fill(Color.white.opacity(model.simulator.isPlaying ? 0.4 : 0.9)))
+                            .background(Circle().fill(Surface.tint(model.simulator.isPlaying ? 0.4 : 0.9)))
                     }
                     .buttonStyle(.plain)
                     .disabled(model.simulator.isPlaying)
@@ -332,7 +332,7 @@ struct SimulatorPanel: View {
                     Button { model.stop() } label: {
                         Image(systemName: "stop.fill").font(.system(size: 20))
                             .frame(width: 52, height: 52)
-                            .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1.5))
+                            .overlay(Circle().strokeBorder(Surface.tint(0.3), lineWidth: 1.5))
                     }
                     .buttonStyle(.plain)
                     .disabled(!model.simulator.isPlaying)
@@ -344,7 +344,7 @@ struct SimulatorPanel: View {
                     Spacer()
                     TextField("Simulator timecode", text: $targetText, prompt: Text("hh:mm:ss:ff"))
                         .labelsHidden()
-                        .textFieldStyle(TrigFieldStyle())
+                        .largeField()
                         .font(TrigType.body.monospacedDigit())
                         .foregroundColor(target == nil ? StateColor.alert : .primary)
                         .frame(width: 130)

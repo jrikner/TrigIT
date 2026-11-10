@@ -277,15 +277,15 @@ Note Off, and Note On with velocity 0, are ignored.
 
 ### Show mode and Edit mode
 
-The switch at the top of the window chooses **Show** (⌘1) or **Edit** (⌘2). Show mode is made to be read from a few metres away: the live timecode and source, the current Song with how far into it you are, the next Song and how long until it starts, and the whole Set with each Song marked current or fired.
+The switch at the top of the window, or the View menu, chooses **Show** (⌘1) or **Edit** (⌘2). The Show menu has Arm, Show Lock (⇧⌘L) and the Simulator's Play and Stop (⌥⌘P); File has New Song (⇧⌘N) and New Destination. Show mode is made to be read from a few metres away: the live timecode and source, the current Song with how far into it you are, the next Song and how long until it starts, and the whole Set with each Song marked current or fired.
 
 <!-- SCREENSHOT: Show mode, Disarmed, light + dark, @2x -->
 
 ### Armed
 
-**Armed** (⇧⌘A, the button at the top right) is the master switch. Armed, Songs send their Actions. Disarmed, TrigIT still follows the timecode and shows which Song is current, but sends nothing. Disarming also releases any held MIDI notes and clears the "fired" marks.
+**Armed** (⇧⌘A, the button at the top right, or Show > Arm) is the master switch. Armed, Songs send their Actions. Disarmed, TrigIT still follows the timecode and shows which Song is current, but sends nothing. Disarming also releases any held MIDI notes and clears the "fired" marks.
 
-TrigIT is Armed every time it launches. A Song the timecode entered while disarmed is not shown as playing until it is entered again while Armed.
+A normal launch starts disarmed; TrigIT arms itself only when it reopens after a crash. A Song the timecode entered while disarmed is not shown as playing until it is entered again while Armed.
 
 To send a Song by hand, open it in Edit → Songs: **Send Start** sends its Start Actions and **Send Stop** its Stop Actions, even when disarmed. These buttons are in Edit mode, so under Show Lock you turn the lock off first.
 

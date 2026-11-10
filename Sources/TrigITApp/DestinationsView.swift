@@ -17,23 +17,37 @@ struct DestinationsView: View {
                     }
                 }
                 .listStyle(.inset)
+                .contextMenu(forSelectionType: DestinationID.self) { ids in
+                    if let id = ids.first, ids.count == 1, let destination = model.set.destination(id) {
+                        Button("Send Test") { model.testDestination(destination) }
+                        Divider()
+                        Button("Delete Destination", role: .destructive) {
+                            selection = id
+                            deleteSelected()
+                        }
+                        .disabled(model.isShowLocked || model.set.isInUse(id))
+                    }
+                }
+                .onDeleteCommand {
+                    if let selection, !model.isShowLocked, !model.set.isInUse(selection) { deleteSelected() }
+                }
                 RowDivider()
                 HStack {
-                    Button {
+                    let inUse = selection.map(model.set.isInUse) ?? false
+                    AddRemoveButtons(add: "New Destination",
+                                     remove: inUse ? "Used by an Action; remove those Actions first" : "Delete Destination",
+                                     canRemove: selection != nil && !inUse) {
                         model.addDestination()
                         selection = model.set.destinations.last?.id
-                    } label: { Label("Destination", systemImage: "plus") }
+                    } onRemove: {
+                        deleteSelected()
+                    }
                     Spacer()
-                    let inUse = selection.map(model.set.isInUse) ?? false
-                    Button { deleteSelected() } label: { Label("Delete Destination", systemImage: "minus").labelStyle(.iconOnly) }
-                    .disabled(selection == nil || inUse)
-                    .help(inUse ? "Used by an Action; remove those Actions first" : "Delete the selected Destination")
                 }
-                .capsuleButton()
                 .disabled(model.isShowLocked)
-                .padding(12)
+                .padding(8)
             }
-            .frame(width: 340)
+            .frame(minWidth: 240, idealWidth: 300, maxWidth: 340)
             .overlay(alignment: .trailing) { Rectangle().fill(Surface.hairline).frame(width: 1) }
 
             Group {
@@ -45,7 +59,18 @@ struct DestinationsView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear { if selection == nil { selection = model.set.destinations.first?.id } }
+        .onAppear {
+            if selection == nil { selection = model.set.destinations.first?.id }
+            selectRequested()
+        }
+        .onChange(of: model.destinationToSelect) { _ in selectRequested() }
+    }
+
+    /// New Destination from the menu bar.
+    private func selectRequested() {
+        guard let id = model.destinationToSelect else { return }
+        model.destinationToSelect = nil
+        selection = id
     }
 
     /// Asks first; the in-use rule disables the button before it gets here.
@@ -109,7 +134,7 @@ struct DestinationDetail: View {
                     GroupedBox {
                         FormRow(label: "Address") {
                             TextField("IP address", text: binding(\.host))
-                                .textFieldStyle(TrigFieldStyle())
+                                .textFieldStyle(.roundedBorder)
                                 .font(TrigType.body.monospacedDigit())
                                 .frame(width: 220)
                         }
@@ -146,7 +171,7 @@ struct DestinationDetail: View {
                             RowDivider()
                             FormRow(label: "Address") {
                                 TextField(output == .artNet ? "IP or broadcast address" : "IP address", text: binding(\.dmxHost))
-                                    .textFieldStyle(TrigFieldStyle())
+                                    .textFieldStyle(.roundedBorder)
                                     .font(TrigType.body.monospacedDigit())
                                     .frame(width: 220)
                             }
@@ -160,7 +185,7 @@ struct DestinationDetail: View {
                             FormRow(label: "Priority") {
                                 HStack(spacing: 8) {
                                     TextField("Priority", value: binding(\.sacnPriority), format: .number)
-                                        .textFieldStyle(TrigFieldStyle())
+                                        .textFieldStyle(.roundedBorder)
                                         .font(TrigType.body.monospacedDigit())
                                         .frame(width: 80)
                                     Stepper("Priority", value: binding(\.sacnPriority), in: Destination.sacnPriorityRange)
@@ -171,7 +196,7 @@ struct DestinationDetail: View {
                             RowDivider()
                             FormRow(label: "Source name") {
                                 TextField(Destination.defaultDMXSourceName, text: binding(\.dmxSourceName))
-                                    .textFieldStyle(TrigFieldStyle())
+                                    .textFieldStyle(.roundedBorder)
                                     .frame(width: 220)
                             }
                         }
@@ -295,7 +320,7 @@ struct PortField: View {
             }
         ))
         .labelsHidden()
-        .textFieldStyle(TrigFieldStyle())
+        .textFieldStyle(.roundedBorder)
         .font(TrigType.body.monospacedDigit())
         .frame(width: 220)
         .foregroundColor(UInt16(text).map { $0 > 0 } == true ? .primary : StateColor.alert)
@@ -328,7 +353,7 @@ struct ReplyPortField: View {
             }
         ))
         .labelsHidden()
-        .textFieldStyle(TrigFieldStyle())
+        .textFieldStyle(.roundedBorder)
         .font(TrigType.body.monospacedDigit())
         .frame(width: 220)
         .foregroundColor(isValid ? .primary : StateColor.alert)

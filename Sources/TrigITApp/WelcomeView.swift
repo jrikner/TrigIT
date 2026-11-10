@@ -69,7 +69,7 @@ struct WelcomeView: View {
                 Image(systemName: symbol)
                     .font(.system(size: 18, weight: .semibold))
                     .frame(width: 40, height: 40)
-                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.white.opacity(0.1)))
+                    .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Surface.tint(0.1)))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(TrigType.rowTitle)
                     Text(detail).font(TrigType.secondary).foregroundColor(.secondary)
@@ -110,19 +110,19 @@ struct HoverRowStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(configuration.isPressed ? 0.14 : hovering ? 0.07 : 0)))
+                .fill(Surface.tint(configuration.isPressed ? 0.14 : hovering ? 0.07 : 0)))
             .onHover { hovering = $0 }
     }
 }
 
 // MARK: - Opening
 
-/// Shown for every way a Set opens, at least 1.2 s (0.6 s with Reduce Motion).
+/// A short greeting as a Set opens. The Set is ready underneath at once:
+/// clicks go through, and it fades out without holding anything up.
 struct OpeningView: View {
     @EnvironmentObject private var model: ShowModel
     let setName: String
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var progress = 0.0
 
     var body: some View {
         VStack(spacing: 28) {
@@ -134,21 +134,15 @@ struct OpeningView: View {
                 .font(.system(size: 60, weight: .bold))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 900)
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.12))
-                Capsule().fill(Color.white.opacity(0.8)).frame(width: 260 * progress)
-            }
-            .frame(width: 260, height: 6)
-            Text("Opening \(setName)…").font(.system(size: 18)).foregroundColor(.secondary)
+            Text(setName).font(.title3).foregroundColor(.secondary)
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .allowsHitTesting(false)
         .task(id: setName) {
-            let duration = reduceMotion ? 0.6 : 1.2
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: duration)) { progress = 1 }
-            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { model.openingSetName = nil }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) { model.openingSetName = nil }
         }
     }
 }
@@ -223,7 +217,7 @@ struct NewSetSetupView: View {
         HStack(spacing: 8) {
             ForEach(1...3, id: \.self) { index in
                 Capsule()
-                    .fill(index < step ? StateColor.ok : index == step ? Color.white.opacity(0.85) : Color.white.opacity(0.18))
+                    .fill(index < step ? StateColor.ok : index == step ? Surface.tint(0.85) : Surface.tint(0.18))
                     .frame(width: 40, height: 5)
             }
             Text("Step \(step) of 3").font(TrigType.secondary).foregroundColor(.secondary).padding(.leading, 8)
@@ -263,9 +257,9 @@ struct NewSetSetupView: View {
                         }
                         .padding(16)
                         .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.05)))
+                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Surface.tint(0.05)))
                         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(preset == item ? Color.white.opacity(0.85) : Surface.hairline, lineWidth: 2))
+                            .strokeBorder(preset == item ? Surface.tint(0.85) : Surface.hairline, lineWidth: 2))
                         .contentShape(RoundedRectangle(cornerRadius: 14))
                     }
                     .buttonStyle(.plain)
@@ -276,12 +270,12 @@ struct NewSetSetupView: View {
                 GroupHeader(preset.rawValue)
                 GroupedBox {
                     FormRow(label: "Address") {
-                        TextField("IP address", text: $host).textFieldStyle(TrigFieldStyle())
+                        TextField("IP address", text: $host).textFieldStyle(.roundedBorder)
                             .font(TrigType.body.monospacedDigit()).frame(width: 220)
                     }
                     RowDivider()
                     FormRow(label: "OSC port") {
-                        TextField("Port", text: $port).textFieldStyle(TrigFieldStyle())
+                        TextField("Port", text: $port).textFieldStyle(.roundedBorder)
                             .font(TrigType.body.monospacedDigit()).frame(width: 220)
                             .foregroundColor(UInt16(port).map { $0 > 0 } == true ? .primary : StateColor.alert)
                     }
