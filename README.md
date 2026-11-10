@@ -18,6 +18,8 @@ This README is the manual. Words with a capital letter (Set, Song, Action, Desti
 
 ## What it does
 
+![Show mode: the live timecode, the current Song with its progress, and the Set](docs/images/show-mode.png)
+
 ```mermaid
 flowchart LR
     subgraph In["Timecode in"]
@@ -128,12 +130,16 @@ Intro,01:00:00:00,01:04:00:00
 
 ### Editing Songs
 
+![Editing a Song: its start and end, Start and Stop Notes, and Actions](docs/images/songs.png)
+
 - **Capture:** play timecode to the right moment and click **Capture** next to the start or end time: it takes the live Playhead.
 - **No overlaps:** every timecode position belongs to at most one Song. An edit that would overlap another Song is refused, and the Songs in the way are highlighted.
 - **Notes instead of timecode:** turn **Timecode span** off and give the Song a Start Note and/or Stop Note (see [Start and Stop Notes](#start-and-stop-notes)).
 - **Order:** a Song's Actions are sent in list order. Drag the handle to reorder.
 
 ## Timecode Sources
+
+![The Timecode screen: Primary and Backup sources, and Stop detection](docs/images/timecode.png)
 
 Choose sources in **Edit → Timecode**. The left column is the **Primary Source**; the right is the optional **Backup Source**, which must be a different type. Each column shows the live timecode, an input level, and the state of the source.
 
@@ -176,6 +182,8 @@ A Song has two lists: **Start Actions**, sent when the Song is entered, and **St
 The **Test** button on an Action sends just that Action now, even when disarmed, so you can check it while programming. After a failed send it reads **Retry**. **Add** is available once the Set has a Destination.
 
 ### Destinations
+
+![A Destination: OSC address and port, with MIDI and DMX switched off](docs/images/destinations.png)
 
 Set up devices in **Edit → Destinations**. Each Destination has a name and three transports, each switched on or off:
 
@@ -326,6 +334,8 @@ bash install-launch-agent.sh --uninstall
 ```
 
 ### Logs
+
+![The Fire Log: every firing, dropout and stop, sortable and searchable](docs/images/fire-log.png)
 
 **Edit → Fire Log** lists everything that happened: each firing, every send and whether it failed, Dropouts, Stops, failovers, arming, and problems. Filter it by kind, and **Export…** it as a CSV file.
 
