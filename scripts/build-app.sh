@@ -17,7 +17,11 @@ BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/TrigIT
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/TrigIT"
+# SwiftPM links against the current SDK but records the deployment target
+# (13.0) as the SDK version, so AppKit would draw the app in its macOS 13 look,
+# with small control labels (#28). Record the SDK it was really built with.
+vtool -set-build-version macos 13.0 "$(xcrun --show-sdk-version)" -replace \
+    -output "$APP/Contents/MacOS/TrigIT" "$BIN"
 # The Icon Composer icon (Assets.car for macOS 26, AppIcon.icns for older macOS)
 # and the neutral accent colour.
 xcrun actool Resources/AppIcon.icon Resources/Assets.xcassets --compile "$APP/Contents/Resources" \
