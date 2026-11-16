@@ -67,6 +67,36 @@ jobs:
       - run: busted
       - run: lua build.lua --check
 
+  # The FFGL plugin for Resolume (ffgl-plugin/): the engine core's loopback
+  # test everywhere, and the plugin itself on macOS and Windows, for testers.
+  ffgl-plugin:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ffgl-plugin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+      - run: cmake --build build --config Release
+      - run: ctest --test-dir build -C Release --output-on-failure
+      # Ad-hoc signed, so an Apple silicon Mac will load it.
+      - if: runner.os == 'macOS'
+        run: codesign --force --sign - build/TrigIT.bundle && ditto -c -k --keepParent build/TrigIT.bundle TrigIT.bundle.zip
+      - if: runner.os == 'macOS'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: TrigIT-FFGL-macOS
+          path: ffgl-plugin/TrigIT.bundle.zip
+      - if: runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: TrigIT-FFGL-Windows
+          path: ffgl-plugin/build/Release/TrigIT.dll
+
   # Keeps the core portable for the Windows version (#60), and builds the
   # Windows spike for testers (docs/windows-spike.md). Pushes to main and
   # manual runs only, and informational: a failure
