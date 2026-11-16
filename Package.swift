@@ -27,7 +27,7 @@ var targets: [Target] = [
     .target(name: "TrigITStorage", dependencies: ["TrigITEngine"]),
     // Fixtures: what grandMA3 onPC exported, read by path (MA3ExportTests).
     .testTarget(name: "TrigITStorageTests", dependencies: ["TrigITStorage"], exclude: ["Fixtures"]),
-    // The Windows spike's platform-free half (issue #60): argument parsing,
+    // The Windows spike's platform-free half (issue #1): argument parsing,
     // the engine loop and the timing report. Built everywhere so its tests run everywhere.
     .target(name: "TrigITSpike", dependencies: ["TrigITEngine", "TrigITProtocols"]),
     .testTarget(name: "TrigITSpikeTests", dependencies: ["TrigITSpike", "TrigITStorage"]),

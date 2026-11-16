@@ -3,7 +3,7 @@
 import Foundation
 import TrigITEngine
 
-// The Windows UI (issue #60, ADR 0004): a page in the browser, served by the
+// The Windows UI (issue #1, ADR 0004): a page in the browser, served by the
 // app on 127.0.0.1. The page only reads; timecode and firing never wait on it.
 
 extension SpikeSession {
