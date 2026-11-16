@@ -52,7 +52,9 @@ struct Core::Impl
 {
 	mutable std::mutex mutex;//Guards everything the host's threads share with ours.
 	Status status;
-	std::string pendingText, pendingPath;
+	std::string pendingText, pendingPath, pendingCuePort;
+	std::vector< std::pair< std::string, std::string > > pendingCues;
+	bool hasPendingCues = false;
 	bool hasPendingText = false, hasPendingPath = false, hasPendingArmed = false, pendingArmed = false;
 	std::atomic< uint16_t > boundPort{ 0 };
 	std::atomic< bool > running{ true };
@@ -176,14 +178,18 @@ struct Core::Impl
 
 	void applyPending()
 	{
-		std::string text, path;
-		bool loadText, loadPath, arm, armed;
+		std::string text, path, cuePort;
+		std::vector< std::pair< std::string, std::string > > cues;
+		bool loadText, loadPath, arm, armed, setCues;
 		{
 			std::lock_guard< std::mutex > lock( mutex );
 			loadText = hasPendingText, loadPath = hasPendingPath, arm = hasPendingArmed, armed = pendingArmed;
 			text.swap( pendingText );
 			path.swap( pendingPath );
-			hasPendingText = hasPendingPath = hasPendingArmed = false;
+			setCues = hasPendingCues;
+			cues.swap( pendingCues );
+			cuePort.swap( pendingCuePort );
+			hasPendingText = hasPendingPath = hasPendingArmed = hasPendingCues = false;
 		}
 		if( loadText || loadPath )
 			notice.clear();
@@ -199,6 +205,20 @@ struct Core::Impl
 		}
 		if( loadText && call( "load", 1, [ & ] { lua_pushlstring( lua, text.data(), text.size() ); return 1; } ) )
 			lua_pop( lua, 1 );
+		if( setCues )
+			call( "setCues", 0, [ & ] {
+				lua_createtable( lua, int( cues.size() ), 0 );
+				lua_createtable( lua, int( cues.size() ), 0 );
+				for( size_t i = 0; i < cues.size(); ++i )
+				{
+					lua_pushlstring( lua, cues[ i ].first.data(), cues[ i ].first.size() );
+					lua_rawseti( lua, -3, lua_Integer( i + 1 ) );
+					lua_pushlstring( lua, cues[ i ].second.data(), cues[ i ].second.size() );
+					lua_rawseti( lua, -2, lua_Integer( i + 1 ) );
+				}
+				lua_pushlstring( lua, cuePort.data(), cuePort.size() );
+				return 3;
+			} );
 		if( arm )
 			call( "setArmed", 0, [ & ] { lua_pushboolean( lua, armed ); return 1; } );
 	}
@@ -298,6 +318,12 @@ void Core::loadSetText( const std::string& json )
 {
 	std::lock_guard< std::mutex > lock( impl->mutex );
 	impl->pendingText = json, impl->hasPendingText = true;
+}
+
+void Core::setCues( const std::vector< std::pair< std::string, std::string > >& cues, const std::string& oscPort )
+{
+	std::lock_guard< std::mutex > lock( impl->mutex );
+	impl->pendingCues = cues, impl->pendingCuePort = oscPort, impl->hasPendingCues = true;
 }
 
 void Core::setArmed( bool armed )

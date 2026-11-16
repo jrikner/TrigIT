@@ -73,7 +73,7 @@ Each release also has `TrigIT-MA3-plugin.zip`: the plugin that runs a Set on a g
 
 ### Resolume plugin (preview)
 
-TrigIT also runs inside Resolume as an FFGL effect, with no second app: it follows Art-Net Timecode and fires a Set's OSC Actions. It is untested in Resolume so far, and sends OSC only. See [the plugin's guide](ffgl-plugin/README.md).
+TrigIT also runs inside Resolume as an FFGL effect, with no second app: it follows Art-Net Timecode and fires cues typed into the effect, or a Set's OSC Actions. It is untested in Resolume so far, and sends OSC only. See [the plugin's guide](ffgl-plugin/README.md).
 
 ### Windows (preview)
 

@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace trigit
 {
@@ -37,6 +39,11 @@ public:
 	void loadSetFile( const std::string& path );
 	void loadSetText( const std::string& json );
 	void setArmed( bool armed );
+	/// Cues typed into the host instead of a Set file: a time ("hh:mm:ss:ff") and
+	/// a target (a Resolume column number, or an OSC address and arguments)
+	/// each, sent to `oscPort` on this computer. If any is filled in, the Cues
+	/// are the Set; otherwise the file is.
+	void setCues( const std::vector< std::pair< std::string, std::string > >& cues, const std::string& oscPort );
 
 	Status status() const;
 	/// The UDP port timecode is followed on, 0 if it could not be opened.

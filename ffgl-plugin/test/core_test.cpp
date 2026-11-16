@@ -124,6 +124,19 @@ int main()
 
 	check( eventually( [ & ] { return core.status().message == "Timecode stopped"; } ), "a Stop after the Set's Stop time of silence" );
 
+	//Cues typed into the plugin's parameters, with no Set file.
+	core.setCues( { { "03:00:00:00", "2" }, { "", "" }, { "03:00:10;00", "/foo 1000 -1 hello 1.234 5.678" }, { "3 o'clock", "1" } }, port );
+	check( eventually( [ & ] { return core.status().message == "Cue 4: the time must be hh:mm:ss:ff"; } ), "names the Cue it can't read" );
+	sendTimecode( sender, core.port(), 3, 0, 0, 0, 1 );
+	std::string column( "/composition/columns/2/connect\0\0,i\0\0\0\0\0\x01", 40 );
+	check( receive( receiver, 1000 ) == column, "a Cue with a column number launches that Resolume column" );
+	sendTimecode( sender, core.port(), 3, 0, 9, 24, 1 );
+	check( receive( receiver, 100 ).empty(), "nothing fires before the next Cue's time" );
+	sendTimecode( sender, core.port(), 3, 0, 10, 0, 1 );
+	check( receive( receiver, 1000 ) == foo, "the next Cue fires on its own frame, with its OSC address and arguments" );
+	core.setCues( { { "", "" } }, port );
+	check( eventually( [ & ] { return core.status().message.rfind( "Loaded Test:", 0 ) == 0; } ), "with no Cues, the Set file is the Set again" );
+
 	std::printf( failures ? "%d FAILED\n" : "all passed\n", failures );
 	return failures ? 1 : 0;
 }

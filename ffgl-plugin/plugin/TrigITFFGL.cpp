@@ -7,6 +7,8 @@
 #include <FFGLSDK.h>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace ffglex;
 
@@ -15,7 +17,10 @@ enum Param : FFUInt32
 	PARAM_SET,
 	PARAM_ARMED,
 	PARAM_SHOW,
+	PARAM_OSC_PORT,
+	PARAM_FIRST_CUE,//Then a time and a target for each Cue.
 };
+static const unsigned int CUE_COUNT = 16;
 
 static const char vertexShader[] = R"(#version 410 core
 uniform vec2 MaxUV;
@@ -97,6 +102,12 @@ public:
 		SetFileParamInfo( PARAM_SET, "Set", { "trigit" }, "" );
 		SetParamInfo( PARAM_ARMED, "Armed", FF_TYPE_BOOLEAN, false );
 		SetParamInfo( PARAM_SHOW, "Show timecode", FF_TYPE_BOOLEAN, false );
+		SetParamInfo( PARAM_OSC_PORT, "Cue OSC port", FF_TYPE_TEXT, "7000" );
+		for( unsigned int i = 0; i < CUE_COUNT; ++i )
+		{
+			SetParamInfo( PARAM_FIRST_CUE + i * 2, ( "Cue " + std::to_string( i + 1 ) + " time" ).c_str(), FF_TYPE_TEXT, "" );
+			SetParamInfo( PARAM_FIRST_CUE + i * 2 + 1, ( "Cue " + std::to_string( i + 1 ) + " column" ).c_str(), FF_TYPE_TEXT, "" );
+		}
 	}
 
 	FFResult InitGL( const FFGLViewportStruct* vp ) override
@@ -110,6 +121,7 @@ public:
 		core = trigit::Core::shared();
 		if( !setPath.empty() )
 			core->loadSetFile( setPath );
+		core->setCues( cues, oscPort );
 		core->setArmed( armed );
 		return CFFGLPlugin::InitGL( vp );
 	}
@@ -185,20 +197,43 @@ public:
 
 	FFResult SetTextParameter( unsigned int index, const char* value ) override
 	{
-		if( index != PARAM_SET )
+		std::string text = value ? value : "";
+		if( index == PARAM_SET )
+		{
+			setPath = text;
+			if( core && !setPath.empty() )
+				core->loadSetFile( setPath );
+			return FF_SUCCESS;
+		}
+		std::string* cue = cueText( index );
+		if( !cue )
 			return FF_FAIL;
-		setPath = value ? value : "";
-		if( core && !setPath.empty() )
-			core->loadSetFile( setPath );
+		*cue = text;
+		if( core )
+			core->setCues( cues, oscPort );
 		return FF_SUCCESS;
 	}
 
 	char* GetTextParameter( unsigned int index ) override
 	{
-		return index == PARAM_SET ? const_cast< char* >( setPath.c_str() ) : nullptr;
+		std::string* text = index == PARAM_SET ? &setPath : cueText( index );
+		return text ? const_cast< char* >( text->c_str() ) : nullptr;
 	}
 
 private:
+	/// The text behind the OSC port or a Cue parameter, nullptr for any other.
+	std::string* cueText( unsigned int index )
+	{
+		if( index == PARAM_OSC_PORT )
+			return &oscPort;
+		if( index < PARAM_FIRST_CUE || index >= PARAM_FIRST_CUE + CUE_COUNT * 2 )
+			return nullptr;
+		auto& cue = cues[ ( index - PARAM_FIRST_CUE ) / 2 ];
+		return ( index - PARAM_FIRST_CUE ) % 2 == 0 ? &cue.first : &cue.second;
+	}
+
+	std::vector< std::pair< std::string, std::string > > cues = std::vector< std::pair< std::string, std::string > >( CUE_COUNT );
+	std::string oscPort = "7000";
 	std::shared_ptr< trigit::Core > core;
 	std::string setPath, lastMessage;
 	bool armed = false, showTimecode = false;
