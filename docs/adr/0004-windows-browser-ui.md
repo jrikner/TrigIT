@@ -1,6 +1,6 @@
 # The Windows UI is a page in the browser, served by the app
 
-The Windows version (issue #60, ADR 0002) needs a UI. We looked at WinUI 3 from Swift first: The Browser Company archived its ready-made Swift bindings for WinUI and the Windows App SDK in October 2025, and the last versions depend on local folders, so another package can't use them. What's left is generating our own bindings with `swift-winrt` (0.1.x, Windows-only, and per its own notes unable to project all of WinUI). With no Windows PC to try it on, that was too much risk for the UI.
+The Windows version (issue #1, ADR 0002) needs a UI. We looked at WinUI 3 from Swift first: The Browser Company archived its ready-made Swift bindings for WinUI and the Windows App SDK in October 2025, and the last versions depend on local folders, so another package can't use them. What's left is generating our own bindings with `swift-winrt` (0.1.x, Windows-only, and per its own notes unable to project all of WinUI). With no Windows PC to try it on, that was too much risk for the UI.
 
 So the Windows app serves its UI as a web page from the same process: the Show Engine, the timecode inputs and the senders stay in Swift, and a browser shows the page.
 

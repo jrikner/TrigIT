@@ -3,7 +3,7 @@
 Thanks for testing! This is not the Windows app yet. It is a small program in a
 command window that listens to timecode, fires a Set's OSC messages at the right
 moments, and measures how well Windows keeps time while doing it. What we learn
-decides how the real Windows app gets built ([issue #60](https://github.com/jrikner/TrigIT/issues/60)).
+decides how the real Windows app gets built ([issue #1](https://github.com/jrikner/TrigIT/issues/1)).
 
 It takes about 20 minutes. You need a Windows 10 or 11 PC and at least one of:
 
@@ -81,7 +81,7 @@ Unplug or stop the first one mid-way to see the take-over.
 
 ## 7. Send the reports
 
-Add a comment on [issue #60](https://github.com/jrikner/TrigIT/issues/60) and drag each report `.txt` file into it. Please also write a few lines:
+Add a comment on [issue #1](https://github.com/jrikner/TrigIT/issues/1) and drag each report `.txt` file into it. Please also write a few lines:
 
 - the PC (make and model, or CPU), Windows version, and the audio interface;
 - what sent the timecode, and at which frame rate;

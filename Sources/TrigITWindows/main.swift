@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The Windows spike (issue #60): follows Art-Net Timecode and/or LTC, fires a
+// The Windows spike (issue #1): follows Art-Net Timecode and/or LTC, fires a
 // Set's OSC Actions through the Show Engine, and writes a timing report on
 // exit. The Windows calls live in CWindowsIO; the logic in TrigITSpike.
 
@@ -242,7 +242,7 @@ let report = session.report(environment, endedAt: cwio_now())
 do {
     try report.write(to: reportURL, atomically: true, encoding: .utf8)
     print("\nTiming report written to \(reportURL.path)")
-    print("Please attach it to a comment on https://github.com/jrikner/TrigIT/issues/60")
+    print("Please attach it to a comment on https://github.com/jrikner/TrigIT/issues/1")
 } catch {
     print(report)
     fail("could not write the report to \(reportURL.path): \(error)")
