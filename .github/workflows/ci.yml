@@ -16,7 +16,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - run: scripts/check-dco.sh ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
@@ -26,12 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     container: swift:6.4.2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Check release.yml builds Windows with the same Swift
         run: |
           grep -q "SWIFT_VERSION: $SWIFT_VERSION " .github/workflows/release.yml
       # No Package.resolved (no dependencies), so key on the manifest.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .build
           key: linux-swift-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.swift') }}
@@ -41,10 +41,10 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: swift
         run: echo "version=$(swift --version 2>&1 | head -1 | md5)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .build
           key: macos-${{ steps.swift.outputs.version }}-${{ hashFiles('Package.swift') }}
@@ -58,26 +58,26 @@ jobs:
       run:
         working-directory: ma3-plugin
     steps:
-      - uses: actions/checkout@v4
-      - uses: leafo/gh-actions-lua@v13.1.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: leafo/gh-actions-lua@32909a2dea0a48c433aec79e7fcd31b4cd55800f # v13.1.0
         with:
           luaVersion: "5.4.8"
-      - uses: leafo/gh-actions-luarocks@v6.1.1
+      - uses: leafo/gh-actions-luarocks@1c4a92caecc8f6850f673cbadfd57b3e555417ce # v6.1.1
       - run: luarocks install busted 2.3.0-1
       - run: busted
       - run: lua build.lua --check
 
   # Keeps the core portable for the Windows version (#60), and builds the
   # Windows spike for testers (docs/windows-spike.md). Pushes to main and
-  # manual runs only while the repo is private, and informational: a failure
+  # manual runs only, and informational: a failure
   # doesn't fail CI.
   windows:
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: compnerd/gha-setup-swift@v0.5.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
         with:
           branch: swift-${{ env.SWIFT_VERSION }}-release
           tag: ${{ env.SWIFT_VERSION }}-RELEASE
@@ -93,7 +93,7 @@ jobs:
       - name: Smoke-run the Windows spike
         shell: pwsh
         run: ./scripts/smoke-windows.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: TrigIT-Windows
           path: TrigIT-Windows

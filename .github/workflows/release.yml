@@ -36,7 +36,7 @@ jobs:
           done
           exit $missing
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # build-app.sh numbers the build by commit count
 
@@ -112,8 +112,8 @@ jobs:
       TAG: ${{ github.ref_name }}
       SWIFT_VERSION: 6.4.2 # ci.yml checks it matches its own
     steps:
-      - uses: actions/checkout@v4
-      - uses: compnerd/gha-setup-swift@v0.5.1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
         with:
           branch: swift-${{ env.SWIFT_VERSION }}-release
           tag: ${{ env.SWIFT_VERSION }}-RELEASE

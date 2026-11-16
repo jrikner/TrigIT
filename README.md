@@ -372,3 +372,9 @@ To build TrigIT from source, run the tests, or send a change, see [CONTRIBUTING.
 Originally created by Jonathan Rikner. © 2026 Jonathan Rikner.
 
 TrigIT is free software under the GNU General Public License, version 3 or (at your option) any later version (`GPL-3.0-or-later`); see [LICENSE](LICENSE). [NOTICE](NOTICE) adds one term under GPL §7(b): modified versions must keep the attribution "Originally created by Jonathan Rikner" in their README and in the app's About window.
+
+The name TrigIT and its icon are not licensed under the GPL (§7(e)): a modified version must use a different name and icon. TrigIT is free; if someone charges you for it, the original is here.
+
+grandMA3 is a trademark of MA Lighting Technology GmbH and Resolume is a trademark of Resolume B.V. TrigIT is an independent project, not affiliated with or endorsed by either.
+
+To report a security problem, see [SECURITY.md](SECURITY.md).

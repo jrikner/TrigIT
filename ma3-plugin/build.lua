@@ -38,7 +38,7 @@ local files = {
     ["dist/TrigIT.xml"] = ([[
 <?xml version="1.0" encoding="UTF-8"?>
 <GMA3 DataVersion="2.5.1.0">
-  <Plugin Name="TrigIT" Author="TrigIT" Version="%s">
+  <Plugin Name="TrigIT" Author="Jonathan Rikner" Version="%s">
     <ComponentLua Name="TrigIT" FileName="TrigIT.lua" />
   </Plugin>
 </GMA3>

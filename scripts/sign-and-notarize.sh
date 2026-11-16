@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds TrigIT.app, signs it with your Developer ID, notarizes it with Apple
 # and staples the ticket, so it opens on any Mac without Gatekeeper warnings.
 # Result: build/TrigIT.app and build/TrigIT.zip (the one to hand out).

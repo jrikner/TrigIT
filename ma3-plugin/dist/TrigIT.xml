@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <GMA3 DataVersion="2.5.1.0">
-  <Plugin Name="TrigIT" Author="TrigIT" Version="0.1.0">
+  <Plugin Name="TrigIT" Author="Jonathan Rikner" Version="0.1.0">
     <ComponentLua Name="TrigIT" FileName="TrigIT.lua" />
   </Plugin>
 </GMA3>

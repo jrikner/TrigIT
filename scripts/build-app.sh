@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds build/TrigIT.app: a universal release build of the TrigIT executable
 # in a proper app bundle, ad-hoc signed so it runs on this Mac.
 # For a Developer ID signed and notarized build, use sign-and-notarize.sh.

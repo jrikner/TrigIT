@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Fails if any non-merge commit in BASE..HEAD lacks a Signed-off-by line (DCO).
 #
 #   scripts/check-dco.sh <base> <head>

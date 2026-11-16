@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Installs a launch agent that keeps TrigIT running: it starts at login and,
 # if TrigIT crashes or is killed, launchd relaunches it within a few seconds.
 # Quitting TrigIT normally (⌘Q) leaves it quit.
